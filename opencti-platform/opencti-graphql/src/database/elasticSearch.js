@@ -20,8 +20,7 @@ const defaultIndexes = [
   'stix_domain_entities',
   'stix_relations',
   'stix_observables',
-  'external_references',
-  'work_jobs'
+  'external_references'
 ];
 
 const indexedRelations = ['tags', 'createdByRef', 'markingDefinitions'];

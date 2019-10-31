@@ -172,11 +172,10 @@ const StixObservableEnrichment = (props) => {
                               dense={true}
                               button={true}
                               divider={true}
-                              classes={{ root: classes.nested }}
-                            >
+                              classes={{ root: classes.nested }}>
                               <ListItemIcon>
-                                {(work.status === 'error'
-                                  || work.status === 'partial') && (
+                                {(work.status.state === 'error'
+                                  || work.status.state === 'partial') && (
                                   <Warning
                                     style={{
                                       fontSize: 15,
@@ -184,7 +183,7 @@ const StixObservableEnrichment = (props) => {
                                     }}
                                   />
                                 )}
-                                {work.status === 'complete' && (
+                                {work.status.state === 'complete' && (
                                   <CheckCircle
                                     style={{
                                       fontSize: 15,
@@ -192,7 +191,7 @@ const StixObservableEnrichment = (props) => {
                                     }}
                                   />
                                 )}
-                                {work.status === 'progress' && (
+                                {work.status.state === 'progress' && (
                                   <CircularProgress
                                     size={20}
                                     thickness={2}
@@ -236,7 +235,9 @@ const StixObservableEnrichmentFragment = createRefetchContainer(
           connector {
             name
           }
-          status
+          status {
+            state
+          }
         }
         connectors(onlyAlive: false) {
           id

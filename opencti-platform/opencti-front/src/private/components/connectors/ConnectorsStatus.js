@@ -184,8 +184,7 @@ class ConnectorsStatusComponent extends Component {
       <Card
         raised={true}
         classes={{ root: classes.card }}
-        style={{ maxHeight: '100vh', height: '100%' }}
-      >
+        style={{ maxHeight: '100vh', height: '100%' }}>
         <CardHeader
           avatar={<Extension className={classes.icon} />}
           title={t('Registered connectors')}
@@ -196,16 +195,14 @@ class ConnectorsStatusComponent extends Component {
             <ListItem
               classes={{ root: classes.itemHead }}
               divider={false}
-              style={{ paddingTop: 0 }}
-            >
+              style={{ paddingTop: 0 }}>
               <ListItemIcon>
                 <span
                   style={{
                     padding: '0 8px 0 8px',
                     fontWeight: 700,
                     fontSize: 12,
-                  }}
-                >
+                  }}>
                   #
                 </span>
               </ListItemIcon>
@@ -221,56 +218,63 @@ class ConnectorsStatusComponent extends Component {
               />
             </ListItem>
             {sortedConnectors.map((connector) => (
-              <ListItem
-                key={connector.id}
-                classes={{ root: classes.item }}
-                divider={true}
-                button={true}
-              >
-                <ListItemIcon
-                  style={{
-                    color: connector.active ? '#4caf50' : '#f44336',
-                  }}
-                >
-                  <Extension />
-                </ListItemIcon>
-                <ListItemText
-                  primary={
-                    <div>
-                      <div
-                        className={classes.bodyItem}
-                        style={inlineStyles.name}
-                      >
-                        {connector.name}
-                      </div>
-                      <div
-                        className={classes.bodyItem}
-                        style={inlineStyles.connector_type}
-                      >
-                        {connector.connector_type}
-                      </div>
-                      <div
-                        className={classes.bodyItem}
-                        style={inlineStyles.connector_scope}
-                      >
-                        {connector.connector_scope.map((scope) => (
-                          <Chip
-                            key={scope}
-                            classes={{ root: classes.chip }}
-                            label={scope}
-                          />
-                        ))}
-                      </div>
-                      <div
-                        className={classes.bodyItem}
-                        style={inlineStyles.updated_at}
-                      >
-                        {nsdt(connector.updated_at)}
-                      </div>
-                    </div>
-                  }
-                />
-              </ListItem>
+                <React.Fragment key={connector.id}>
+                  <ListItem classes={{ root: classes.item }}
+                    divider={true}
+                    button={true}>
+                    <ListItemIcon
+                      style={{
+                        color: connector.active ? '#4caf50' : '#f44336',
+                      }}
+                    >
+                      <Extension />
+                    </ListItemIcon>
+                    <ListItemText
+                      primary={
+                        <div>
+                          <div
+                            className={classes.bodyItem}
+                            style={inlineStyles.name}
+                          >
+                            {connector.name}
+                          </div>
+                          <div
+                            className={classes.bodyItem}
+                            style={inlineStyles.connector_type}
+                          >
+                            {connector.connector_type}
+                          </div>
+                          <div
+                            className={classes.bodyItem}
+                            style={inlineStyles.connector_scope}
+                          >
+                            {connector.connector_scope.map((scope) => (
+                              <Chip
+                                key={scope}
+                                classes={{ root: classes.chip }}
+                                label={scope}
+                              />
+                            ))}
+                          </div>
+                          <div
+                            className={classes.bodyItem}
+                            style={inlineStyles.updated_at}
+                          >
+                            {nsdt(connector.updated_at)}
+                          </div>
+                        </div>
+                      }
+                    />
+                  </ListItem>
+                  {connector.works.map((workElem) => (
+                      <ListItem key={workElem.id} classes={{ root: classes.item }}>
+                        <ListItemText primary={
+                          <div>
+                            {workElem.created_at} - {workElem.status.state} - {workElem.status.jobsDoneCount} / {workElem.status.jobsCount}
+                          </div>
+                        }/>
+                      </ListItem>))}
+                </React.Fragment>
             ))}
           </List>
         </CardContent>
@@ -304,6 +308,19 @@ const ConnectorsStatus = createRefetchContainer(
           connector_type
           connector_scope
           updated_at
+          works {
+            id
+            created_at
+            status {
+              state
+              jobsCount
+              jobsDoneCount
+              jobsPerState {
+                count
+                status
+              }
+            }
+          }
         }
       }
     `,

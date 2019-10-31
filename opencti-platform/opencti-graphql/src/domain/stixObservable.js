@@ -27,7 +27,7 @@ import {
   paginate as elPaginate
 } from '../database/elasticSearch';
 import { connectorsForEnrichment } from './connector';
-import { createWork } from './work';
+import {createWork, initiateJob} from './work';
 import { pushToConnector } from '../database/rabbitmq';
 import { linkCreatedByRef, linkMarkingDef } from './stixEntity';
 
@@ -104,15 +104,11 @@ const askEnrich = async (observableId, scope) => {
   const targetConnectors = await connectorsForEnrichment(scope, true);
   // Create job for
   const workList = await Promise.all(
-    map(
-      connector =>
-        createWork(connector, observableId).then(({ job, work }) => ({
-          connector,
-          job,
-          work
-        })),
-      targetConnectors
-    )
+    map(async connector => {
+      const work = await createWork(connector, observableId);
+      const job = await initiateJob(work.id);
+      return { connector, job, work };
+    }, targetConnectors)
   );
   // Send message to all correct connectors queues
   await Promise.all(
@@ -131,10 +127,11 @@ const askEnrich = async (observableId, scope) => {
 
 export const stixObservableAskEnrichment = async (id, connectorId) => {
   const connector = await getById(connectorId);
-  const { job, work } = await createWork(connector, id);
+  const work = await createWork(connector, id);
+  const job = await initiateJob(work.id);
   const message = {
-    work_id: work.internal_id_key,
-    job_id: job.internal_id_key,
+    work_id: work.id,
+    job_id: job.id,
     entity_id: id
   };
   await pushToConnector(connector, message);

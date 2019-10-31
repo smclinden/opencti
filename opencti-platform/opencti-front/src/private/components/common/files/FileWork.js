@@ -51,16 +51,15 @@ class FileWorkComponent extends Component {
               dense={true}
               button={true}
               divider={true}
-              classes={{ root: classes.nested }}
-            >
+              classes={{ root: classes.nested }}>
               <ListItemIcon>
-                {(work.status === 'error' || work.status === 'partial') && (
+                {(work.status.state === 'error' || work.status.state === 'partial') && (
                   <Warning style={{ fontSize: 15, color: '#f44336' }} />
                 )}
-                {work.status === 'complete' && (
+                {work.status.state === 'complete' && (
                   <CheckCircle style={{ fontSize: 15, color: '#4caf50' }} />
                 )}
-                {work.status === 'progress' && (
+                {work.status.state === 'progress' && (
                   <CircularProgress
                     size={20}
                     thickness={2}
@@ -70,7 +69,7 @@ class FileWorkComponent extends Component {
               </ListItemIcon>
               <ListItemText
                 primary={work.connector.name}
-                secondary={t(work.status)}
+                secondary={t(work.status.state)}
               />
               <ListItemSecondaryAction style={{ right: 0 }}>
                 <IconButton onClick={this.deleteWork.bind(this, work.id)}>
@@ -98,11 +97,13 @@ const FileWork = createFragmentContainer(FileWorkComponent, {
         connector {
           name
         }
+        status {
+          state
+        }
         jobs {
           created_at
           messages
         }
-        status
         work_type
         created_at
       }

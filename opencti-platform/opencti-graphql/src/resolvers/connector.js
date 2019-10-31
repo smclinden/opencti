@@ -9,9 +9,10 @@ import {
   connectorForWork,
   jobsForWork,
   updateJob,
-  computeWorkStatus,
   initiateJob,
-  deleteWork
+  deleteWork,
+  computeWorkStatus,
+  workForConnector
 } from '../domain/work';
 
 const connectorResolvers = {
@@ -19,6 +20,9 @@ const connectorResolvers = {
     connectors: () => connectors(),
     connectorsForExport: () => connectorsForExport(),
     connectorsForImport: () => connectorsForImport()
+  },
+  Connector: {
+    works: connector => workForConnector(connector.id)
   },
   Work: {
     jobs: work => jobsForWork(work.id),

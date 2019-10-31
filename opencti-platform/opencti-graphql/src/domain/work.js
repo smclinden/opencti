@@ -1,15 +1,16 @@
 import uuid from 'uuid/v4';
-import { assoc, map, filter, pipe } from 'ramda';
+import { assoc, filter, map, pipe, reduce, add } from 'ramda';
 import moment from 'moment';
 import { getById, now, sinceNowInMinutes } from '../database/grakn';
 import {
+  el,
   elDeleteByField,
   getAttributes,
   index,
   paginate
 } from '../database/elasticSearch';
 
-const WORK_INDEX = 'work_jobs_index';
+export const WORK_INDEX = 'connector_works';
 
 export const workToExportFile = work => {
   return {
@@ -43,18 +44,71 @@ export const jobsForWork = async id => {
   });
 };
 
-export const computeWorkStatus = async id => {
-  const jobs = await jobsForWork(id);
-  // Status can be progress / partial / complete
-  const isProgress = job =>
-    job.job_status === 'wait' || job.job_status === 'progress';
-  const nbProgress = filter(job => isProgress(job), jobs).length;
+const computeState = async (totalCount, stats) => {
+  // Compute in progress
+  const isProgress = st => st.status === 'wait' || st.status === 'progress';
+  const nbProgress = pipe(
+    filter(stat => isProgress(stat)),
+    map(e => e.count),
+    reduce(add, 0)
+  )(stats);
   if (nbProgress > 0) return 'progress';
-  const nbErrors = filter(l => l.job_status === 'error', jobs).length;
-  if (nbErrors === jobs.length) return 'error';
-  const nbComplete = filter(l => l.job_status === 'complete', jobs).length;
-  if (nbComplete === jobs.length) return 'complete';
+  // Is fully error
+  const nbErrors = pipe(
+    filter(stat => stat.status === 'error'),
+    map(e => e.count),
+    reduce(add, 0)
+  )(stats);
+  if (nbErrors === totalCount) return 'error';
+  // Is fully complete
+  const nbComplete = pipe(
+    filter(stat => stat.status === 'complete'),
+    map(e => e.count),
+    reduce(add, 0)
+  )(stats);
+  if (nbComplete === totalCount) return 'complete';
+  // Else
   return 'partial';
+};
+
+export const computeWorkStatus = async id => {
+  const query = {
+    aggs: {
+      work: {
+        filter: {
+          bool: {
+            must: [{ term: { work_id: id } }, { term: { entity_type: 'Job' } }]
+          }
+        },
+        aggs: {
+          status: {
+            terms: { field: 'job_status' }
+          }
+        }
+      }
+    }
+  };
+  const result = await el.search({ index: WORK_INDEX, body: query });
+  const aggStatus = result.body.aggregations.work.status;
+  const totalCount = pipe(
+    map(e => e.doc_count),
+    reduce(add, 0)
+  )(aggStatus.buckets);
+  const jobsDoneCount = pipe(
+    filter(e => e.key === 'complete' || e.key === 'error'),
+    map(e => e.doc_count),
+    reduce(add, 0)
+  )(aggStatus.buckets);
+  const perStatus = map(
+    e => ({ status: e.key, count: e.doc_count }),
+    aggStatus.buckets
+  );
+  return {
+    state: computeState(totalCount, perStatus),
+    jobsCount: totalCount,
+    jobsDoneCount,
+    jobsPerState: perStatus
+  };
 };
 
 export const workForEntity = async (entityId, args) => {
@@ -64,6 +118,19 @@ export const workForEntity = async (entityId, args) => {
     first: args.first,
     filters: {
       work_entity: entityId
+    }
+  });
+};
+
+export const workForConnector = async connectorId => {
+  return paginate(WORK_INDEX, {
+    type: 'Work',
+    connectionFormat: false,
+    first: 5,
+    orderBy: 'created_at',
+    orderMode: 'desc',
+    filters: {
+      connector_id: connectorId
     }
   });
 };
@@ -121,9 +188,8 @@ export const initiateJob = workId => {
 };
 
 export const createWork = async (connector, entityId = null, fileId = null) => {
-  // Create the work and a initial job
   const workInternalId = uuid();
-  const createdWork = await index(WORK_INDEX, {
+  return index(WORK_INDEX, {
     id: workInternalId,
     internal_id_key: workInternalId,
     grakn_id: workInternalId,
@@ -136,8 +202,6 @@ export const createWork = async (connector, entityId = null, fileId = null) => {
     created_at: now(),
     updated_at: now()
   });
-  const createdJob = await initiateJob(workInternalId);
-  return { work: createdWork, job: createdJob };
 };
 
 export const updateJob = async (jobId, status, messages) => {

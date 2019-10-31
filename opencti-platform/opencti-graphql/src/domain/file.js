@@ -2,7 +2,7 @@ import { map } from 'ramda';
 import { loadFile, upload } from '../database/minio';
 import { pushToConnector } from '../database/rabbitmq';
 import { connectorsForImport } from './connector';
-import { createWork } from './work';
+import { createWork, initiateJob } from './work';
 import { logger } from '../config/conf';
 
 const uploadJobImport = async (fileId, fileMime) => {
@@ -10,23 +10,19 @@ const uploadJobImport = async (fileId, fileMime) => {
   if (connectors.length > 0) {
     // Create job and send ask to broker
     const workList = await Promise.all(
-      map(
-        connector =>
-          createWork(connector, null, fileId).then(({ work, job }) => ({
-            connector,
-            work,
-            job
-          })),
-        connectors
-      )
+      map(async connector => {
+        const work = await createWork(connector, null, fileId);
+        const job = await initiateJob(work.id);
+        return { connector, job, work };
+      }, connectors)
     );
     // Send message to all correct connectors queues
     await Promise.all(
       map(data => {
         const { connector, work, job } = data;
         const message = {
-          work_id: work.internal_id_key, // work(id)
-          job_id: job.internal_id_key, // job(id)
+          work_id: work.id, // work(id)
+          job_id: job.id, // job(id)
           file_mime: fileMime, // Ex. application/json
           file_path: `/storage/get/${fileId}` // Path to get the file
         };

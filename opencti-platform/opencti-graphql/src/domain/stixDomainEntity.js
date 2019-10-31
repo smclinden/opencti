@@ -29,7 +29,7 @@ import {
 
 import { generateFileExportName, upload } from '../database/minio';
 import { connectorsForExport } from './connector';
-import { createWork, workToExportFile } from './work';
+import {createWork, initiateJob, workToExportFile} from './work';
 import { pushToConnector } from '../database/rabbitmq';
 import { linkCreatedByRef, linkMarkingDef } from './stixEntity';
 
@@ -116,20 +116,12 @@ const askJobExports = async (entity, format, exportType) => {
   const connectors = await connectorsForExport(format, true);
   // Create job for every connectors
   const workList = await Promise.all(
-    map(connector => {
-      const fileName = generateFileExportName(
-        format,
-        connector,
-        exportType,
-        entity
-      );
-      return createWork(connector, entity.id, fileName).then(
-        ({ work, job }) => ({
-          connector,
-          job,
-          work
-        })
-      );
+    map(async connector => {
+      // eslint-disable-next-line prettier/prettier
+      const fileName = generateFileExportName(format, connector, exportType, entity);
+      const work = await createWork(connector, entity.id, fileName);
+      const job = await initiateJob(work.id);
+      return { connector, job, work };
     }, connectors)
   );
   // Send message to all correct connectors queues
@@ -137,8 +129,8 @@ const askJobExports = async (entity, format, exportType) => {
     map(data => {
       const { connector, job, work } = data;
       const message = {
-        work_id: work.internal_id_key, // work(id)
-        job_id: job.internal_id_key, // job(id)
+        work_id: work.id, // work(id)
+        job_id: job.id, // job(id)
         export_type: exportType, // simple or full
         entity_type: entity.entity_type, // report, threat, ...
         entity_id: entity.id, // report(id), thread(id), ...
