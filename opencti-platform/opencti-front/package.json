@@ -135,7 +135,7 @@
     "chokidar": "4.0.3",
     "compression": "1.8.0",
     "cross-env": "7.0.3",
-    "esbuild": "0.25.5",
+    "esbuild": "0.25.6",
     "esbuild-jest": "0.5.0",
     "eslint": "8.57.1",
     "eslint-config-airbnb": "19.0.4",
@@ -155,10 +155,10 @@
     "relay-compiler": "20.0.0",
     "relay-test-utils": "20.0.0",
     "typescript": "5.9.2",
-    "vite": "6.3.5",
+    "vite": "7.0.0",
     "vite-plugin-relay": "2.1.0",
     "vite-plugin-static-copy": "2.3.1",
-    "vitest": "2.0.5"
+    "vitest": "2.1.9"
   },
   "engines": {
     "node": ">= 17.*"
