@@ -10,7 +10,7 @@ const EE_COLOR = '#0c7e69';
 export const THEME_LIGHT_DEFAULT_BACKGROUND = '#f8f8f8';
 const THEME_LIGHT_DEFAULT_PRIMARY = '#001bda';
 const THEME_LIGHT_DEFAULT_SECONDARY = '#0c7e69';
-const THEME_LIGHT_DEFAULT_ACCENT = '#eeeeee';
+const THEME_LIGHT_DEFAULT_ACCENT = '#dfdfdf';
 const THEME_LIGHT_DEFAULT_PAPER = '#ffffff';
 const THEME_LIGHT_DEFAULT_NAV = '#ffffff';
 
@@ -47,6 +47,7 @@ const ThemeLight = (
       primary: hexToRGB((primary || THEME_LIGHT_DEFAULT_PRIMARY), 0.3),
       secondary: hexToRGB((secondary || THEME_LIGHT_DEFAULT_SECONDARY), 0.3),
       pagination: hexToRGB('#000000', 0.5),
+      paper: hexToRGB('#000000', 0.12),
     },
     pagination: {
       main: '#000000',
@@ -64,7 +65,7 @@ const ThemeLight = (
       paper: paper || THEME_LIGHT_DEFAULT_PAPER,
       nav: nav || THEME_LIGHT_DEFAULT_NAV,
       accent: accent || THEME_LIGHT_DEFAULT_ACCENT,
-      shadow: 'rgba(0, 0, 0, .05)',
+      shadow: 'rgba(0, 0, 0, .15)',
     },
   },
   typography: {

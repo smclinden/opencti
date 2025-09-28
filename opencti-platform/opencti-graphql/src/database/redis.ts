@@ -1,15 +1,13 @@
 import { SEMATTRS_DB_NAME } from '@opentelemetry/semantic-conventions';
-import Redis, { Cluster, type RedisOptions, type SentinelAddress } from 'ioredis';
+import { Cluster, Redis } from 'ioredis';
+import type { ChainableCommander, CommonRedisOptions, ClusterOptions, RedisOptions, SentinelAddress, SentinelConnectionOptions } from 'ioredis';
 import { Redlock } from '@sesamecare-oss/redlock';
 import * as jsonpatch from 'fast-json-patch';
 import { RedisPubSub } from 'graphql-redis-subscriptions';
 import * as R from 'ramda';
-import type { ChainableCommander } from 'ioredis/built/utils/RedisCommander';
-import type { ClusterOptions } from 'ioredis/built/cluster/ClusterOptions';
-import type { SentinelConnectionOptions } from 'ioredis/built/connectors/SentinelConnector';
 import conf, { booleanConf, configureCA, DEV_MODE, getStoppingState, loadCert, logApp, REDIS_PREFIX } from '../config/conf';
-import { asyncListTransformation, EVENT_TYPE_CREATE, EVENT_TYPE_DELETE, EVENT_TYPE_MERGE, EVENT_TYPE_UPDATE, isEmptyField, isNotEmptyField, waitInSec } from './utils';
-import { isStixExportableData } from '../schema/stixCoreObject';
+import { asyncListTransformation, EVENT_TYPE_CREATE, EVENT_TYPE_DELETE, EVENT_TYPE_MERGE, EVENT_TYPE_UPDATE, isEmptyField, isNotEmptyField, wait, waitInSec } from './utils';
+import { INTERNAL_EXPORTABLE_TYPES, isStixExportableInStreamData } from '../schema/stixCoreObject';
 import { DatabaseError, LockTimeoutError, TYPE_LOCK_ERROR, UnsupportedError } from '../config/errors';
 import { mergeDeepRightAll, now, utcDate } from '../utils/format';
 import { convertStoreToStix } from './stix-2-1-converter';
@@ -40,6 +38,8 @@ import { enrichWithRemoteCredentials } from '../config/credentials';
 import { getDraftContext } from '../utils/draftContext';
 import type { ExclusionListCacheItem } from './exclusionListCache';
 import { refreshLocalCacheForEntity } from './cache';
+import { asyncMap } from '../utils/data-processing';
+import { STIX_EXT_OCTI } from '../types/stix-2-1-extensions';
 
 const USE_SSL = booleanConf('redis:use_ssl', false);
 const REDIS_CA = conf.get('redis:ca').map((path: string) => loadCert(path));
@@ -51,10 +51,13 @@ const isStreamPublishable = (opts: EventOpts) => {
   return opts.publishStreamEvent === undefined || opts.publishStreamEvent;
 };
 
-const redisOptions = async (autoReconnect = false): Promise<RedisOptions> => {
+const connectionName = (provider: string) => `${REDIS_PREFIX}${provider.replaceAll(' ', '_')}`;
+
+const redisOptions = async (provider: string, autoReconnect = false): Promise<RedisOptions> => {
   const baseAuth = { username: conf.get('redis:username'), password: conf.get('redis:password') };
   const userPasswordAuth = await enrichWithRemoteCredentials('redis', baseAuth);
   return {
+    connectionName: connectionName(provider),
     keyPrefix: REDIS_PREFIX,
     ...userPasswordAuth,
     tls: USE_SSL ? { ...configureCA(REDIS_CA), servername: conf.get('redis:hostname') } : undefined,
@@ -96,8 +99,8 @@ export const generateNatMap = (mappings: string[]): Record<string, { host: strin
   return natMap;
 };
 
-const clusterOptions = async (): Promise<ClusterOptions> => {
-  const redisOpts = await redisOptions();
+const clusterOptions = async (provider: string): Promise<ClusterOptions> => {
+  const redisOpts = await redisOptions(provider);
   return {
     keyPrefix: REDIS_PREFIX,
     lazyConnect: true,
@@ -110,10 +113,16 @@ const clusterOptions = async (): Promise<ClusterOptions> => {
   };
 };
 
-const sentinelOptions = async (clusterNodes: Partial<SentinelAddress>[]): Promise<SentinelConnectionOptions> => {
-  const baseAuth = { sentinelPassword: conf.get('redis:sentinel_password') };
+const sentinelOptions = async (provider: string, clusterNodes: Partial<SentinelAddress>[]): Promise<SentinelConnectionOptions & CommonRedisOptions> => {
+  const baseAuth = {
+    sentinelUsername: conf.get('redis:sentinel_username'),
+    sentinelPassword: conf.get('redis:sentinel_password'),
+    username: conf.get('redis:username'),
+    password: conf.get('redis:password'),
+  };
   const passwordAuth = await enrichWithRemoteCredentials('redis', baseAuth);
   return {
+    connectionName: connectionName(provider),
     ...passwordAuth,
     keyPrefix: REDIS_PREFIX,
     name: conf.get('redis:sentinel_master_name'),
@@ -131,20 +140,20 @@ export const createRedisClient = async (provider: string, autoReconnect = false)
   const redisMode: string = conf.get('redis:mode');
   const clusterNodes = generateClusterNodes(conf.get('redis:hostnames') ?? []);
   if (redisMode === 'cluster') {
-    const clusterOpts = await clusterOptions();
+    const clusterOpts = await clusterOptions(provider);
     client = new Redis.Cluster(clusterNodes, clusterOpts);
   } else if (redisMode === 'sentinel') {
-    const sentinelOpts = await sentinelOptions(clusterNodes);
+    const sentinelOpts = await sentinelOptions(provider, clusterNodes);
     client = new Redis(sentinelOpts);
   } else {
-    const singleOptions = await redisOptions(autoReconnect);
+    const singleOptions = await redisOptions(provider, autoReconnect);
     client = new Redis({ ...singleOptions, db: conf.get('redis:database') ?? 0, port: conf.get('redis:port'), host: conf.get('redis:hostname') });
   }
 
-  client.on('close', () => logApp.debug(`[REDIS] Redis '${provider}' client closed`));
-  client.on('ready', () => logApp.debug(`[REDIS] Redis '${provider}' client ready`));
+  client.on('close', () => logApp.debug('[REDIS] Redis client closed', { provider }));
+  client.on('ready', () => logApp.debug('[REDIS] Redis client ready', { provider }));
   client.on('error', (err) => logApp.error('Redis client connection fail', { cause: err, provider }));
-  client.on('reconnecting', () => logApp.debug(`[REDIS] '${provider}' Redis client reconnecting`));
+  client.on('reconnecting', () => logApp.debug('[REDIS] Redis client reconnecting', { provider }));
   return client;
 };
 
@@ -178,10 +187,11 @@ export const initializeRedisClients = async () => {
     })
   };
 };
-export const shutdownRedisClients = async () => {
-  await redisClients.base?.quit().catch(() => { /* Dont care */ });
-  await redisClients.lock?.quit().catch(() => { /* Dont care */ });
-  await redisClients.pubsub?.close().catch(() => { /* Dont care */ });
+export const shutdownRedisClients = () => {
+  redisClients.base?.disconnect();
+  redisClients.lock?.disconnect();
+  redisClients.pubsub?.getPublisher()?.disconnect();
+  redisClients.pubsub?.getSubscriber()?.disconnect();
 };
 // endregion
 
@@ -316,7 +326,7 @@ export const redisInit = async () => {
     await initializeRedisClients();
     await redisIsAlive();
     const redisMode: string = conf.get('redis:mode');
-    logApp.info(`[REDIS] Clients initialized in ${redisMode} mode`);
+    logApp.info('[REDIS] Clients initialized', { redisMode });
     return true;
   } catch {
     throw DatabaseError('Redis seems down');
@@ -558,14 +568,17 @@ export const buildStixUpdateEvent = (user: AuthUser, previousStix: StixCoreObjec
   if (patch.length === 1 && patch[0].path === '/modified' && !opts.allow_only_modified) {
     throw UnsupportedError('Update event must contains more operation than just modified/updated_at value');
   }
+  const entityType = stix.extensions[STIX_EXT_OCTI].type;
+  const scope = INTERNAL_EXPORTABLE_TYPES.includes(entityType) ? 'internal' : 'external';
   return {
     version: EVENT_CURRENT_VERSION,
     type: EVENT_TYPE_UPDATE,
-    scope: 'external',
+    scope,
     message,
     origin: user.origin,
     data: stix,
     commit: opts.commit,
+    noHistory: opts.noHistory,
     context: {
       patch,
       reverse_patch: previousPatch,
@@ -585,7 +598,7 @@ const buildUpdateEvent = (user: AuthUser, previous: StoreObject, instance: Store
 };
 export const storeUpdateEvent = async (context: AuthContext, user: AuthUser, previous: StoreObject, instance: StoreObject, message: string, opts: UpdateEventOpts = {}) => {
   try {
-    if (isStixExportableData(instance)) {
+    if (isStixExportableInStreamData(instance)) {
       const event = buildUpdateEvent(user, previous, instance, message, opts);
       await pushToStream(context, user, getClientBase(), event, opts);
       return event;
@@ -601,7 +614,7 @@ export const buildCreateEvent = (user: AuthUser, instance: StoreObject, message:
   return {
     version: EVENT_CURRENT_VERSION,
     type: EVENT_TYPE_CREATE,
-    scope: 'external',
+    scope: INTERNAL_EXPORTABLE_TYPES.includes(instance.entity_type) ? 'internal' : 'external',
     message,
     origin: user.origin,
     data: stix,
@@ -609,7 +622,7 @@ export const buildCreateEvent = (user: AuthUser, instance: StoreObject, message:
 };
 export const storeCreateRelationEvent = async (context: AuthContext, user: AuthUser, instance: StoreRelation, opts: CreateEventOpts = {}) => {
   try {
-    if (isStixExportableData(instance)) {
+    if (isStixExportableInStreamData(instance)) {
       const { withoutMessage = false, restore = false } = opts;
       let message = '-';
       if (!withoutMessage) {
@@ -626,7 +639,7 @@ export const storeCreateRelationEvent = async (context: AuthContext, user: AuthU
 };
 export const storeCreateEntityEvent = async (context: AuthContext, user: AuthUser, instance: StoreObject, message: string, opts: CreateEventOpts = {}) => {
   try {
-    if (isStixExportableData(instance)) {
+    if (isStixExportableInStreamData(instance)) {
       const event = buildCreateEvent(user, instance, message);
       await pushToStream(context, user, getClientBase(), event, opts);
       return event;
@@ -647,7 +660,7 @@ export const buildDeleteEvent = async (
   return {
     version: EVENT_CURRENT_VERSION,
     type: EVENT_TYPE_DELETE,
-    scope: 'external',
+    scope: INTERNAL_EXPORTABLE_TYPES.includes(instance.entity_type) ? 'internal' : 'external',
     message,
     origin: user.origin,
     data: stix
@@ -655,7 +668,7 @@ export const buildDeleteEvent = async (
 };
 export const storeDeleteEvent = async (context: AuthContext, user: AuthUser, instance: StoreObject, opts: EventOpts = {}) => {
   try {
-    if (isStixExportableData(instance)) {
+    if (isStixExportableInStreamData(instance)) {
       const message = generateDeleteMessage(instance);
       const event = await buildDeleteEvent(user, instance, message);
       await pushToStream(context, user, getClientBase(), event, opts);
@@ -675,8 +688,8 @@ const mapStreamToJS = ([id, data]: any): SseEvent<any> => {
   }
   return { id, event: obj.type, data: obj };
 };
-export const fetchStreamInfo = async () => {
-  const res: any = await getClientBase().xinfo('STREAM', REDIS_STREAM_NAME);
+export const fetchStreamInfo = async (streamName = REDIS_STREAM_NAME) => {
+  const res: any = await getClientBase().xinfo('STREAM', streamName);
   const info: any = R.fromPairs(R.splitEvery(2, res) as any);
   const firstId = info['first-entry'][0];
   const firstEventDate = utcDate(parseInt(firstId.split('-')[0], 10)).toISOString();
@@ -686,12 +699,11 @@ export const fetchStreamInfo = async () => {
 };
 
 const processStreamResult = async (results: Array<any>, callback: any, withInternal: boolean | undefined) => {
-  const streamData = R.map((r) => mapStreamToJS(r), results);
-  const filteredEvents = streamData.filter((s) => {
-    return withInternal ? true : (s.data.scope ?? 'external') === 'external';
-  });
-  const lastEventId = filteredEvents.length > 0 ? R.last(filteredEvents)?.id : `${new Date().valueOf()}-0`;
-  await callback(filteredEvents, lastEventId);
+  const transform = (r: any) => mapStreamToJS(r);
+  const filter = (s: any) => (withInternal ? true : (s.data.scope ?? 'external') === 'external');
+  const events = await asyncMap(results, transform, filter);
+  const lastEventId = events.length > 0 ? R.last(events)?.id : `${new Date().valueOf()}-0`;
+  await callback(events, lastEventId);
   return lastEventId;
 };
 
@@ -707,13 +719,14 @@ export interface StreamProcessor {
 
 interface StreamOption {
   withInternal?: boolean;
+  bufferTime?: number;
   autoReconnect?: boolean;
   streamName?: string;
-  streamBatchTime?: number
+  streamBatchSize?: number
 }
 
 export const createStreamProcessor = <T extends BaseEvent> (
-  user: AuthUser,
+  _user: AuthUser,
   provider: string,
   callback: (events: Array<SseEvent<T>>, lastEventId: string) => void,
   opts: StreamOption = {}
@@ -723,9 +736,7 @@ export const createStreamProcessor = <T extends BaseEvent> (
   let processingLoopPromise: Promise<void>;
   let streamListening = true;
   const streamName = opts.streamName ?? REDIS_STREAM_NAME;
-  const processInfo = async () => {
-    return fetchStreamInfo();
-  };
+
   const processStep = async () => {
     // since previous call is async (and blocking) we should check if we are still running before processing the message
     if (!streamListening) {
@@ -751,10 +762,11 @@ export const createStreamProcessor = <T extends BaseEvent> (
       } else {
         await processStreamResult([], callback, opts.withInternal);
       }
+      await wait(opts.bufferTime ?? 50);
     } catch (err) {
       logApp.error('Redis stream consume fail', { cause: err, provider });
       if (opts.autoReconnect) {
-        await waitInSec(2);
+        await waitInSec(5);
       } else {
         return false;
       }
@@ -770,28 +782,34 @@ export const createStreamProcessor = <T extends BaseEvent> (
     }
   };
   return {
-    info: async () => processInfo(),
+    info: async () => fetchStreamInfo(streamName),
     running: () => streamListening,
     start: async (start = 'live') => {
-      let fromStart = start;
-      if (isEmptyField(fromStart)) {
-        fromStart = 'live';
+      if (streamListening) {
+        let fromStart = start;
+        if (isEmptyField(fromStart)) {
+          fromStart = 'live';
+        }
+        startEventId = fromStart === 'live' ? '$' : fromStart;
+        logApp.info('[STREAM] Starting stream processor', { provider, startEventId });
+        processingLoopPromise = (async () => {
+          client = await createRedisClient(provider, opts.autoReconnect); // Create client for this processing loop
+          try {
+            await processingLoop();
+          } finally {
+            logApp.info('[STREAM] Stream processor terminated, closing Redis client');
+            client.disconnect();
+          }
+        })();
       }
-      startEventId = fromStart === 'live' ? '$' : fromStart;
-      logApp.info(`[STREAM] Starting stream processor at ${startEventId} for ${provider}`);
-      client = await createRedisClient(provider, opts.autoReconnect); // Create client for this processing loop
-      processingLoopPromise = processingLoop();
     },
     shutdown: async () => {
-      logApp.info(`[STREAM] Shutdown stream processor for ${provider}`);
+      logApp.info('[STREAM] Shutdown stream processor', { provider });
       streamListening = false;
       if (processingLoopPromise) {
         await processingLoopPromise;
       }
       logApp.info('[STREAM] Stream processor current promise terminated');
-      if (client) {
-        await client.disconnect();
-      }
     },
   };
 };
@@ -804,22 +822,24 @@ export const fetchStreamEventsRangeFromEventId = async (
   callback: (events: Array<SseEvent<DataEvent>>, lastEventId: string) => void,
   opts: StreamOption = {},
 ) => {
+  const { streamBatchSize = MAX_RANGE_MESSAGES } = opts;
   let effectiveStartEventId = startEventId;
-  const [startTimestamp] = startEventId.split('-');
-  const endTimestamp = startTimestamp + (opts.streamBatchTime ?? STREAM_BATCH_TIME);
   try {
-    // Consume the data stream
+    // Consume streamBatchSize number of stream events from startEventId (excluded)
     const streamResult = await client.call(
       'XRANGE',
       opts.streamName ?? REDIS_STREAM_NAME,
-      startTimestamp,
-      endTimestamp
+      `(${startEventId}`, // ( prefix to exclude startEventId
+      '+',
+      'COUNT',
+      streamBatchSize,
     ) as any[];
     // Process the event results
     if (streamResult && streamResult.length > 0) {
-      const lastElementId = await processStreamResult(streamResult, callback, opts.withInternal);
-      if (lastElementId) {
-        effectiveStartEventId = lastElementId;
+      const lastStreamResultId = R.last(streamResult)[0]; // id of last event fetched (internal or external)
+      await processStreamResult(streamResult, callback, opts.withInternal); // process the stream events of the range
+      if (lastStreamResultId) {
+        effectiveStartEventId = lastStreamResultId;
       }
     } else {
       await processStreamResult([], callback, opts.withInternal);
@@ -1078,5 +1098,25 @@ export const redisSetConnectorLogs = async (connectorId: string, logs: string[])
 export const redisGetConnectorLogs = async (connectorId: string): Promise<string[]> => {
   const rawLogs = await getClientBase().get(`connector-${connectorId}-logs`);
   return rawLogs ? JSON.parse(rawLogs) : [];
+};
+// endregion
+
+// region connector health metrics
+export interface ConnectorHealthMetrics {
+  restart_count: number;
+  started_at: string;
+  last_update: string;
+  is_in_reboot_loop: boolean;
+}
+
+export const redisSetConnectorHealthMetrics = async (connectorId: string, metrics: ConnectorHealthMetrics) => {
+  const data = JSON.stringify(metrics);
+  // TTL of 5 minutes (300 seconds)
+  await getClientBase().set(`connector-${connectorId}-health`, data, 'EX', 300);
+};
+
+export const redisGetConnectorHealthMetrics = async (connectorId: string): Promise<ConnectorHealthMetrics | null> => {
+  const rawMetrics = await getClientBase().get(`connector-${connectorId}-health`);
+  return rawMetrics ? JSON.parse(rawMetrics) : null;
 };
 // endregion

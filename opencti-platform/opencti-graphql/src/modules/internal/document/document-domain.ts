@@ -5,7 +5,7 @@ import { generateFileIndexId } from '../../../schema/identifier';
 import { ENTITY_TYPE_INTERNAL_FILE } from '../../../schema/internalObject';
 import { elAggregationCount, elCount, elDeleteInstances, elIndex } from '../../../database/engine';
 import { INDEX_DRAFT_OBJECTS, INDEX_INTERNAL_OBJECTS, isEmptyField, READ_INDEX_DRAFT_OBJECTS, READ_INDEX_INTERNAL_OBJECTS } from '../../../database/utils';
-import { type EntityOptions, type FilterGroupWithNested, internalLoadById, listAllEntities, listEntitiesPaginated, storeLoadById } from '../../../database/middleware-loader';
+import { type EntityOptions, type FilterGroupWithNested, internalLoadById, fullEntitiesList, pageEntitiesConnection, storeLoadById } from '../../../database/middleware-loader';
 import type { AuthContext, AuthUser } from '../../../types/user';
 import { type DomainFindById } from '../../../domain/domainTypes';
 import type { BasicStoreEntityDocument } from './document-types';
@@ -23,6 +23,7 @@ import { getDraftFilePrefix } from '../../../database/draft-utils';
 
 export const SUPPORT_STORAGE_PATH = 'support';
 export const IMPORT_STORAGE_PATH = 'import';
+export const EMBEDDED_STORAGE_PATH = 'embedded';
 export const EXPORT_STORAGE_PATH = 'export';
 export const FROM_TEMPLATE_STORAGE_PATH = 'fromTemplate';
 
@@ -143,7 +144,7 @@ export const allFilesForPaths = async (context: AuthContext, user: AuthUser, pat
   }
   const indices = getDraftContext(context, user) ? [READ_INDEX_INTERNAL_OBJECTS, READ_INDEX_DRAFT_OBJECTS] : [READ_INDEX_INTERNAL_OBJECTS];
   const listOptions = { ...opts, ...findOpts, ...orderOptions, indices };
-  return listAllEntities<BasicStoreEntityDocument>(context, user, [ENTITY_TYPE_INTERNAL_FILE], listOptions);
+  return fullEntitiesList<BasicStoreEntityDocument>(context, user, [ENTITY_TYPE_INTERNAL_FILE], listOptions);
 };
 
 // Count remaining files to index
@@ -189,7 +190,7 @@ export const paginatedForPathWithEnrichment = async (context: AuthContext, user:
   }
   const listOptions = { ...opts, entity_id, ...findOpts, ...orderOptions };
 
-  const pagination = await listEntitiesPaginated<BasicStoreEntityDocument>(context, user, [ENTITY_TYPE_INTERNAL_FILE], listOptions);
+  const pagination = await pageEntitiesConnection<BasicStoreEntityDocument>(context, user, [ENTITY_TYPE_INTERNAL_FILE], listOptions);
 
   // region enrichment only possible for single path resolution
   // Enrich pagination for import images
@@ -216,5 +217,5 @@ export const paginatedForPathWithEnrichment = async (context: AuthContext, user:
     pagination.edges = [...progressFiles.map((p: any) => ({ node: p, cursor: uuidv4() })), ...pagination.edges];
   }
   // endregion
-  return pagination ?? [];
+  return pagination;
 };

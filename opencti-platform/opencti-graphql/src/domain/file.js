@@ -2,7 +2,7 @@ import * as R from 'ramda';
 import { Readable } from 'stream';
 import { SEMATTRS_DB_NAME, SEMATTRS_DB_OPERATION } from '@opentelemetry/semantic-conventions';
 import { defaultValidationMode, deleteFile } from '../database/file-storage';
-import { internalLoadById, listAllEntities } from '../database/middleware-loader';
+import { internalLoadById, fullEntitiesList } from '../database/middleware-loader';
 import { buildContextDataForFile, publishUserAction } from '../listener/UserActionListener';
 import { stixCoreObjectImportDelete } from './stixCoreObject';
 import { allFilesMimeTypeDistribution, allRemainingFilesCount } from '../modules/internal/document/document-domain';
@@ -30,13 +30,6 @@ export const buildOptionsFromFileManager = async (context) => {
   const excludedPaths = ['import/pending/']; // always exclude pending
   const managerConfiguration = await getManagerConfigurationFromCache(context, SYSTEM_USER, 'FILE_INDEX_MANAGER');
   const configMimetypes = managerConfiguration.manager_setting?.accept_mime_types;
-  if (isEmptyField(configMimetypes)) {
-    return {
-      globalCount: 0,
-      globalSize: 0,
-      metricsByMimeType: [],
-    };
-  }
   const includeGlobal = managerConfiguration.manager_setting?.include_global_files || false;
   const onlyForEntityTypes = managerConfiguration.manager_setting?.entity_types;
   if (isNotEmptyField(onlyForEntityTypes)) {
@@ -56,6 +49,13 @@ export const filesMetrics = async (context, user) => {
   const metrics = await getStats([READ_INDEX_FILES]);
   const indexedFilesCount = metrics.docs.count;
   const fileOptions = await buildOptionsFromFileManager(context);
+  if (isEmptyField(fileOptions.opts.prefixMimeTypes)) {
+    return {
+      globalCount: 0,
+      globalSize: 0,
+      metricsByMimeType: [],
+    };
+  }
   const filesMimeTypesDistribution = await allFilesMimeTypeDistribution(context, user, fileOptions.paths, fileOptions.opts);
   const remainingFilesCount = await allRemainingFilesCount(context, user, fileOptions.paths, fileOptions.opts);
   const metricsByMimeType = [];
@@ -213,9 +213,8 @@ export const batchFileWorks = async (context, user, files) => {
       filters: [{ key: ['event_source_id'], values: files }],
       filterGroups: [],
     };
-    const items = await listAllEntities(context, user, [ENTITY_TYPE_WORK], {
+    const items = await fullEntitiesList(context, user, [ENTITY_TYPE_WORK], {
       indices: [READ_INDEX_HISTORY],
-      connectionFormat: false,
       orderBy: 'timestamp',
       orderMode: OrderingMode.Desc,
       filters,

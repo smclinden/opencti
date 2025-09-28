@@ -1,8 +1,8 @@
 import {
   addStixRefRelationship,
-  findAll,
+  findRefRelationshipsPaginated,
   findById,
-  findNested,
+  findNestedPaginated,
   isDatable,
   schemaRefRelationships,
   schemaRefRelationshipsPossibleTypes,
@@ -19,12 +19,13 @@ import { subscribeToInstanceEvents } from '../graphql/subscriptionWrapper';
 import { distributionRelations } from '../database/middleware';
 import { schemaRelationsRefTypesMapping } from '../database/stix-ref';
 import { containersPaginated, notesPaginated, opinionsPaginated, reportsPaginated } from '../domain/stixCoreObject';
+import { filterMembersWithUsersOrgs } from '../utils/access';
 
 const stixRefRelationshipResolvers = {
   Query: {
     stixRefRelationship: (_, { id }, context) => findById(context, context.user, id),
-    stixRefRelationships: (_, args, context) => findAll(context, context.user, args),
-    stixNestedRefRelationships: (_, args, context) => findNested(context, context.user, args),
+    stixRefRelationships: (_, args, context) => findRefRelationshipsPaginated(context, context.user, args),
+    stixNestedRefRelationships: (_, args, context) => findNestedPaginated(context, context.user, args),
     stixSchemaRefRelationships: (_, { id, toType }, context) => schemaRefRelationships(context, context.user, id, toType),
     stixSchemaRefRelationshipsPossibleTypes: (_, { type }, context) => schemaRefRelationshipsPossibleTypes(context, context.user, type),
     stixRefRelationshipsDistribution: (_, args, context) => distributionRelations(context, context.user, args),
@@ -39,7 +40,13 @@ const stixRefRelationshipResolvers = {
     reports: (rel, args, context) => reportsPaginated(context, context.user, rel.id, args),
     notes: (rel, args, context) => notesPaginated(context, context.user, rel.id, args),
     opinions: (rel, args, context) => opinionsPaginated(context, context.user, rel.id, args),
-    creators: (rel, _, context) => context.batch.creatorsBatchLoader.load(rel.creator_id),
+    creators: async (rel, _, context) => {
+      const creators = await context.batch.creatorsBatchLoader.load(rel.creator_id);
+      if (!creators) {
+        return [];
+      }
+      return filterMembersWithUsersOrgs(context, context.user, creators);
+    },
     // endregion
     // Utils
     editContext: (rel) => fetchEditContext(rel.id),

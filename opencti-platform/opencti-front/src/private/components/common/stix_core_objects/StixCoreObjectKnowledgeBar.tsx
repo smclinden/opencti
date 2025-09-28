@@ -42,6 +42,9 @@ const stixCoreObjectKnowledgeBarFragment = graphql`
         "located-at"
         "variant-of"
         "belongs-to"
+        "technology"
+        "technology-to"
+        "technology-from"
       ]
     ) {
       label
@@ -60,7 +63,7 @@ const stixCoreObjectKnowledgeBarFragment = graphql`
     stixCoreObjectsDistribution(
       field: "entity_type",
       operation: count,
-      ) {
+    ) {
       label
       value
     }
@@ -168,43 +171,43 @@ const StixCoreObjectKnowledgeBar = ({
           label: 'Sectors',
           iconType: 'Sector',
           path: 'sectors',
-          count: distributions.coreObjects.Sector || 0,
+          count: distributions.withoutRelated.Sector || 0,
         },
         {
           label: 'Regions',
           iconType: 'Region',
           path: 'regions',
-          count: distributions.coreObjects.Region || 0,
+          count: distributions.withoutRelated.Region || 0,
         },
         {
           label: 'Countries',
           iconType: 'Country',
           path: 'countries',
-          count: distributions.coreObjects.Country || 0,
+          count: distributions.withoutRelated.Country || 0,
         },
         {
           label: 'Areas',
           iconType: 'Administrative-Area',
           path: 'areas',
-          count: distributions.coreObjects['Administrative-Area'] || 0,
+          count: distributions.withoutRelated['Administrative-Area'] || 0,
         },
         {
           label: 'Cities',
           iconType: 'City',
           path: 'cities',
-          count: distributions.coreObjects.City || 0,
+          count: distributions.withoutRelated.City || 0,
         },
         {
           label: 'Organizations',
           iconType: 'Organization',
           path: 'organizations',
-          count: distributions.coreObjects.Organization || 0,
+          count: distributions.withoutRelated.Organization || 0,
         },
         {
           label: 'Individuals',
           iconType: 'Individual',
           path: 'individuals',
-          count: distributions.coreObjects.Individual || 0,
+          count: distributions.withoutRelated.Individual || 0,
         },
         {
           label: 'Locations',
@@ -219,7 +222,7 @@ const StixCoreObjectKnowledgeBar = ({
           label: 'Used tools',
           iconType: 'Tool',
           path: 'used_tools',
-          count: distributions.coreObjects.Tool || 0,
+          count: distributions.withoutRelated.Tool || 0,
         },
       ].filter((item) => availableSections.includes(item.path)),
     },
@@ -315,7 +318,7 @@ const StixCoreObjectKnowledgeBar = ({
           label: 'Attack patterns',
           iconType: 'Attack-Pattern',
           path: 'attack_patterns',
-          count: distributions.coreObjects['Attack-Pattern'] || 0,
+          count: distributions.withoutRelated['Attack-Pattern'] || 0,
         },
         {
           label: 'Narratives',
@@ -405,6 +408,7 @@ const StixCoreObjectKnowledgeBar = ({
         component="nav"
         style={{
           marginTop: bannerSettings.bannerHeightNumber + settingsMessagesBannerHeight,
+          marginBottom: bannerSettings.bannerHeightNumber,
           paddingBottom: 0,
         }}
       >

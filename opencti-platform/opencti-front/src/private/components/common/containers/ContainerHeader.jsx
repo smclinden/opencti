@@ -18,7 +18,6 @@ import StixCoreObjectFileExportButton from '../stix_core_objects/StixCoreObjectF
 import StixCoreObjectsSuggestions from '../stix_core_objects/StixCoreObjectsSuggestions';
 import { DraftChip } from '../draft/DraftChip';
 import { stixCoreObjectQuickSubscriptionContentQuery } from '../stix_core_objects/stixCoreObjectTriggersUtils';
-import { useSettingsMessagesBannerHeight } from '../../settings/settings_messages/SettingsMessagesBanner';
 import StixCoreObjectSubscribers from '../stix_core_objects/StixCoreObjectSubscribers';
 import FormAuthorizedMembersDialog from '../form/FormAuthorizedMembersDialog';
 import ExportButtons from '../../../../components/ExportButtons';
@@ -33,6 +32,7 @@ import useGranted, {
   KNOWLEDGE_KNUPDATE_KNDELETE,
   KNOWLEDGE_KNUPDATE_KNMANAGEAUTHMEMBERS,
   KNOWLEDGE_KNUPDATE_KNORGARESTRICT,
+  SETTINGS_SETACCESSES,
 } from '../../../../utils/hooks/useGranted';
 import StixCoreObjectQuickSubscription from '../stix_core_objects/StixCoreObjectQuickSubscription';
 import StixCoreObjectFileExport from '../stix_core_objects/StixCoreObjectFileExport';
@@ -40,6 +40,7 @@ import { authorizedMembersToOptions, useGetCurrentUserAccessRight } from '../../
 import StixCoreObjectEnrichment from '../stix_core_objects/StixCoreObjectEnrichment';
 import { resolveLink } from '../../../../utils/Entity';
 import PopoverMenu from '../../../../components/PopoverMenu';
+import useAuth from '../../../../utils/hooks/useAuth';
 
 export const containerHeaderObjectsQuery = graphql`
   query ContainerHeaderObjectsQuery($id: String!) {
@@ -485,7 +486,7 @@ const ContainerHeader = (props) => {
     navigate(`${entityLink}/${targetTab}?${urlParams}`);
   };
 
-  const settingsMessagesBannerHeight = useSettingsMessagesBannerHeight();
+  const { bannerSettings: { bannerHeightNumber } } = useAuth();
   // containerDefault style
   let containerStyle = {
     display: 'flex',
@@ -499,7 +500,7 @@ const ContainerHeader = (props) => {
     containerStyle = {
       position: 'absolute',
       display: 'flex',
-      top: 166 + settingsMessagesBannerHeight,
+      top: 166 + bannerHeightNumber,
       right: 24,
     };
   }
@@ -695,6 +696,7 @@ const ContainerHeader = (props) => {
                 mutation={containerHeaderEditAuthorizedMembersMutation}
                 open={openAccessRestriction}
                 handleClose={displayAuthorizedMembersButton ? undefined : handleCloseAccessRestriction}
+                canDeactivate={true}
               />
             )}
             {!knowledge && (
@@ -768,7 +770,8 @@ const ContainerHeader = (props) => {
                         title={t_i18n('Enroll in playbook')}
                         setOpen={setOpenEnrollPlaybook}
                         handleCloseMenu={closeMenu}
-                        needs={[KNOWLEDGE_KNENRICHMENT]}
+                        needs={[KNOWLEDGE_KNENRICHMENT, SETTINGS_SETACCESSES]}
+                        matchAll
                       />
                       )}
                       {canDelete && (
@@ -783,10 +786,10 @@ const ContainerHeader = (props) => {
                     </Box>
                   )}
                 </PopoverMenu>
-                {EditComponent}
                 <DeleteComponent isOpen={openDelete} onClose={handleCloseDelete} />
               </>
             )}
+            {EditComponent}
           </div>
         </div>
       </React.Suspense>

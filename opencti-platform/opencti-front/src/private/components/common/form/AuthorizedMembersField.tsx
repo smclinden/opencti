@@ -21,6 +21,8 @@ import useAuth from '../../../../utils/hooks/useAuth';
 import useDraftContext from '../../../../utils/hooks/useDraftContext';
 import { FieldOption, fieldSpacingContainerStyle } from '../../../../utils/field';
 import { Accordion, AccordionSummary } from '../../../../components/Accordion';
+import { OPENCTI_ADMIN_UUID } from '../../../../utils/hooks/useGranted';
+import useHelper from '../../../../utils/hooks/useHelper';
 
 /**
  * Returns true if the authorized member option is generic.
@@ -46,6 +48,12 @@ interface AuthorizedMembersFieldProps
   showCreatorLine?: boolean;
   canDeactivate?: boolean;
   addMeUserWithAdminRights?: boolean;
+  enableAccesses?: boolean;
+  hideInfo?: boolean;
+  adminDefault?: boolean;
+  dynamicKeysForPlaybooks?: boolean;
+  isCanUseEnable?: boolean;
+  customInfoMessage?: string;
 }
 
 // Type of data for internal form, not exposed to others.
@@ -79,19 +87,25 @@ const AuthorizedMembersField = ({
   showCreatorLine = false,
   canDeactivate = false,
   addMeUserWithAdminRights = false,
+  enableAccesses = false,
+  hideInfo = false,
+  adminDefault = false,
+  dynamicKeysForPlaybooks = false,
+  isCanUseEnable = false,
+  customInfoMessage,
 }: AuthorizedMembersFieldProps) => {
   const { t_i18n } = useFormatter();
   const { setFieldValue } = form;
   const { name, value } = field;
   const { me } = useAuth();
   const draftContext = useDraftContext();
+  const { isFeatureEnable } = useHelper();
+  const featureFlagAccessRestriction = isFeatureEnable('ACCESS_RESTRICTION_CAN_USE');
 
   // Value in sync with internal Formik field 'applyAccesses'.
   // Require to use a state in addition to the Formik field because
   // we use the value outside the scope of the internal Formik form.
-  const [applyAccesses, setApplyAccesses] = useState(
-    value && Array.isArray(value) && value.length > 0,
-  );
+  const [applyAccesses, setApplyAccesses] = useState(enableAccesses || (value && Array.isArray(value) && value.length > 0));
   const accessForAllMembers = (value ?? []).find(
     (o) => o.value === ALL_MEMBERS_AUTHORIZED_CONFIG.id,
   );
@@ -114,11 +128,19 @@ const AuthorizedMembersField = ({
     accessRight: accessForCreator?.accessRight ?? 'none',
   };
 
-  const accessRights = [
+  let accessRights = [
     { label: t_i18n('can view'), value: 'view' },
     { label: t_i18n('can edit'), value: 'edit' },
     { label: t_i18n('can manage'), value: 'admin' },
   ];
+  if (isCanUseEnable && featureFlagAccessRestriction) {
+    accessRights = [
+      { label: t_i18n('can view'), value: 'view' },
+      { label: t_i18n('can use'), value: 'use' },
+      { label: t_i18n('can edit'), value: 'edit' },
+      { label: t_i18n('can manage'), value: 'admin' },
+    ];
+  }
 
   /**
    * Add a new authorized member in the value of the field,
@@ -257,7 +279,7 @@ const AuthorizedMembersField = ({
     changeMemberAccess(CREATOR_AUTHORIZED_CONFIG.id, accessRight);
   };
 
-  let accessInfoMessage = t_i18n('info_authorizedmembers_workspace');
+  let accessInfoMessage = customInfoMessage;
   if (canDeactivate) {
     accessInfoMessage = applyAccesses
       ? t_i18n('info_authorizedmembers_knowledge_off')
@@ -303,9 +325,13 @@ const AuthorizedMembersField = ({
           setFieldValue: setField,
         }) => (
           <>
-            <Alert severity="info">{accessInfoMessage}</Alert>
+            {(!hideInfo && !!accessInfoMessage) && (
+              <Alert severity="info">{accessInfoMessage}</Alert>
+            )}
             {!!draftContext && (
-            <Alert style={{ marginTop: 15 }} severity="warning">{t_i18n('Not available in draft')}</Alert>
+              <Alert style={{ marginTop: 15 }} severity="warning">
+                {t_i18n('Not available in draft')}
+              </Alert>
             )}
             {canDeactivate && (
               <Field
@@ -348,6 +374,7 @@ const AuthorizedMembersField = ({
                     <ObjectMembersField
                       name="newAccessMember"
                       disabled={!values.applyAccesses}
+                      dynamicKeysForPlaybooks={dynamicKeysForPlaybooks}
                     />
                     {value?.find(
                       (a) => a.value === values.newAccessMember?.value,
@@ -375,7 +402,7 @@ const AuthorizedMembersField = ({
                     ))}
                   </Field>
                   <IconButton
-                    color="secondary"
+                    color="primary"
                     aria-label="More"
                     onClick={() => handleSubmit()}
                     disabled={
@@ -460,16 +487,19 @@ const AuthorizedMembersField = ({
             <>
               {value && value.length > 0 && (
                 <List sx={{ pt: 0 }}>
-                  {value.map((authorizedMember, index) => (!isGenericOption(authorizedMember.value) ? (
-                    <AuthorizedMembersFieldListItem
-                      key={index}
-                      authorizedMember={authorizedMember}
-                      name={`${name}[${index}].accessRight`}
-                      accessRights={accessRights}
-                      ownerId={owner?.id}
-                      onRemove={() => arrayHelpers.remove(index)}
-                    />
-                  ) : null))}
+                  {value.map((authorizedMember, index) => (
+                    !isGenericOption(authorizedMember.value)
+                      && !(adminDefault && authorizedMember.value === OPENCTI_ADMIN_UUID
+                      ) ? (
+                        <AuthorizedMembersFieldListItem
+                          key={index}
+                          authorizedMember={authorizedMember}
+                          name={`${name}[${index}].accessRight`}
+                          accessRights={accessRights}
+                          ownerId={owner?.id}
+                          onRemove={() => arrayHelpers.remove(index)}
+                        />
+                      ) : null))}
                 </List>
               )}
             </>

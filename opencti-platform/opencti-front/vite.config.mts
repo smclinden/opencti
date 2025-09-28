@@ -1,4 +1,4 @@
-import { createLogger, defineConfig, transformWithEsbuild } from 'vite';
+import { createLogger, defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import * as path from 'node:path';
 import relay from 'vite-plugin-relay';
@@ -204,6 +204,7 @@ export default defineConfig({
 
   optimizeDeps: {
     include: depsToOptimize,
+    exclude: ['filigran-chatbot']
   },
 
   customLogger: logger,
@@ -243,11 +244,14 @@ export default defineConfig({
       '/logout': backProxy(),
       '/stream': backProxy(),
       '/storage': backProxy(),
+      '/schema': backProxy(),
+      '^/.*/embedded/.*': backProxy(),
       '/taxii2': backProxy(),
       '/feeds': backProxy(),
       '/graphql': backProxy(true),
       '/auth': backProxy(),
       '/static/flags': backProxy(),
+      '/chatbot': backProxy(),
     },
   },
 });

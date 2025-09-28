@@ -22,11 +22,13 @@ const UserEditionFragment = graphql`
   @argumentDefinitions(
     groupsOrderBy: { type: "GroupsOrdering", defaultValue: name }
     groupsOrderMode: { type: "OrderingMode", defaultValue: asc }
+    organizationsCount: { type: "Int", defaultValue: 500 }
     organizationsOrderBy: { type: "OrganizationsOrdering", defaultValue: name }
     organizationsOrderMode: { type: "OrderingMode", defaultValue: asc }
   ) {
     id
     external
+    user_service_account
     user_confidence_level {
       max_confidence
       overrides {
@@ -52,6 +54,14 @@ const UserEditionFragment = graphql`
         object {
           ... on User { entity_type id name }
           ... on Group { entity_type id name }
+        }
+      }
+    }
+    objectAssignedOrganization(first: $organizationsCount, orderBy: $organizationsOrderBy, orderMode: $organizationsOrderMode) {
+      edges {
+        node {
+          id
+          name
         }
       }
     }
@@ -111,14 +121,14 @@ const UserEditionDrawer: FunctionComponent<UserEditionDrawerProps> = ({
   const { t_i18n } = useFormatter();
   const hasSetAccess = useGranted([SETTINGS_SETACCESSES]);
   const user = useFragment<UserEdition_user$key>(UserEditionFragment, userRef);
+  const isServiceAccount = user?.user_service_account;
   const [currentTab, setCurrentTab] = useState(0);
   const handleChangeTab = (value: number) => {
     setCurrentTab(value);
   };
-
   return (
     <Drawer
-      title={t_i18n('Update a user')}
+      title={isServiceAccount ? t_i18n('Update Service account') : t_i18n('Update User') }
       open={open}
       onClose={handleClose}
       context={user?.editContext}
@@ -131,10 +141,10 @@ const UserEditionDrawer: FunctionComponent<UserEditionDrawerProps> = ({
             onChange={(event, value) => handleChangeTab(value)}
           >
             <Tab label={t_i18n('Overview')} />
-            <Tab disabled={!!user.external} label={t_i18n('Password')} />
+            <Tab disabled={!!user.external || isServiceAccount === true} label={t_i18n('Password')} />
             <Tab label={t_i18n('Groups')} />
             {hasSetAccess
-              && <Tab label={
+              && <Tab disabled={user.objectAssignedOrganization?.edges.length === 0 } label={
                 <div style={{ alignItems: 'center', display: 'flex' }}>
                   {t_i18n('Organizations admin')}<EEChip />
                 </div>}

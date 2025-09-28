@@ -1,19 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import * as PropTypes from 'prop-types';
-import { Link, Route, Routes, useParams, useLocation } from 'react-router-dom';
+import { Link, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { graphql, useLazyLoadQuery, usePreloadedQuery, useQueryLoader, useSubscription } from 'react-relay';
 import Typography from '@mui/material/Typography';
 import Box from '@mui/material/Box';
 import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
-import makeStyles from '@mui/styles/makeStyles';
 import { styled } from '@mui/material';
 import MenuItem from '@mui/material/MenuItem';
 import { useTheme } from '@mui/styles';
+import ConvertUser from './ConvertUser';
 import UserDeletionDialog from './UserDeletionDialog';
+import UserEmailSend from './UserEmailSend';
 import AccessesMenu from '../AccessesMenu';
 import Security from '../../../../utils/Security';
-import useGranted, { VIRTUAL_ORGANIZATION_ADMIN, SETTINGS_SETACCESSES, KNOWLEDGE_KNUPDATE_KNDELETE } from '../../../../utils/hooks/useGranted';
+import useGranted, { KNOWLEDGE_KNUPDATE_KNDELETE, SETTINGS_SETACCESSES, VIRTUAL_ORGANIZATION_ADMIN } from '../../../../utils/hooks/useGranted';
 import ErrorNotFound from '../../../../components/ErrorNotFound';
 import Loader, { LoaderVariant } from '../../../../components/Loader';
 import User from './User';
@@ -22,6 +23,7 @@ import { useFormatter } from '../../../../components/i18n';
 import Breadcrumbs from '../../../../components/Breadcrumbs';
 import UserEdition from './UserEdition';
 import PopoverMenu from '../../../../components/PopoverMenu';
+import UserHistoryTab from './UserHistoryTab';
 
 const userEditionQuery = graphql`
   query RootUserEditionQuery($id: String!) {
@@ -30,14 +32,6 @@ const userEditionQuery = graphql`
     }
   }
 `;
-
-// Deprecated - https://mui.com/system/styles/basics/
-// Do not use it for new code.
-const useStyles = makeStyles(() => ({
-  title: {
-    float: 'left',
-  },
-}));
 
 const subscription = graphql`
   subscription RootUsersSubscription(
@@ -78,6 +72,7 @@ const userQuery = graphql`
       id
       name
       user_email
+      user_service_account
       ...User_user
         @arguments(
           groupsOrderBy: $groupsOrderBy
@@ -86,6 +81,7 @@ const userQuery = graphql`
           organizationsOrderMode: $organizationsOrderMode
         )
       ...UserAnalytics_user
+      ...UserHistoryTab_user
     }
   }
 `;
@@ -99,7 +95,6 @@ const RootUserComponent = ({ queryRef, userId, refetch }) => {
     [userId],
   );
   const location = useLocation();
-  const classes = useStyles();
   const { t_i18n } = useFormatter();
   const canDelete = useGranted([KNOWLEDGE_KNUPDATE_KNDELETE]);
   const theme = useTheme();
@@ -110,7 +105,6 @@ const RootUserComponent = ({ queryRef, userId, refetch }) => {
     userEditionQuery,
     { id: userId },
   );
-
   const [openDelete, setOpenDelete] = useState(false);
   const handleOpenDelete = () => setOpenDelete(true);
   const handleCloseDelete = () => setOpenDelete(false);
@@ -118,7 +112,7 @@ const RootUserComponent = ({ queryRef, userId, refetch }) => {
   const UserHeader = styled('div')({
     display: 'flex',
     justifyContent: 'space-between',
-    marginBottom: 24,
+    marginBottom: 8,
   });
 
   return (
@@ -138,44 +132,47 @@ const RootUserComponent = ({ queryRef, userId, refetch }) => {
               <Typography
                 variant="h1"
                 gutterBottom={true}
-                classes={{ root: classes.title }}
+                style={{ float: 'left' }}
               >
                 {data.name}
               </Typography>
               <div className="clearfix"/>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <div style={{ display: 'flex' }}>
-                <div style={{ marginRight: theme.spacing(0.5) }}>
-                  {canDelete && (
-                    <PopoverMenu>
-                      {({ closeMenu }) => (
-                        <Box>
-                          <MenuItem onClick={() => {
-                            handleOpenDelete();
-                            closeMenu();
-                          }}
-                          >
-                            {t_i18n('Delete')}
-                          </MenuItem>
-                        </Box>
-                      )}
-                    </PopoverMenu>
-                  )}
-                </div>
-                <UserDeletionDialog
-                  userId={data.id}
-                  isOpen={openDelete}
-                  handleClose={handleCloseDelete}
-                />
-                <UserEdition userEditionData={userEditionData} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing(1) }} >
+              <div style={{ display: 'flex', gap: theme.spacing(0.5) }}>
+                <UserEmailSend outlined userId={userId}/>
+                {canDelete && (
+                  <PopoverMenu>
+                    {({ closeMenu }) => (
+                      <Box>
+                        <MenuItem onClick={() => {
+                          handleOpenDelete();
+                          closeMenu();
+                        }}
+                        >
+                          {t_i18n('Delete')}
+                        </MenuItem>
+                      </Box>
+                    )}
+                  </PopoverMenu>
+                )}
               </div>
+              <ConvertUser
+                userId={data.id}
+                userServiceAccount={data.user_service_account}
+              />
+              <UserDeletionDialog
+                userId={data.id}
+                isOpen={openDelete}
+                handleClose={handleCloseDelete}
+              />
+              <UserEdition userEditionData={userEditionData}/>
             </div>
           </UserHeader>
 
-          <div className="clearfix" />
+          <div className="clearfix"/>
           <Box
-            sx={{ borderBottom: 1, borderColor: 'divider', marginBottom: 4 }}
+            sx={{ borderBottom: 1, borderColor: 'divider', marginBottom: 3 }}
           >
             <Tabs value={location.pathname}>
               <Tab
@@ -190,6 +187,12 @@ const RootUserComponent = ({ queryRef, userId, refetch }) => {
                 value={`/dashboard/settings/accesses/users/${data.id}/analytics`}
                 label={t_i18n('Analytics')}
               />
+              <Tab
+                component={Link}
+                to={`/dashboard/settings/accesses/users/${data.id}/history`}
+                value={`/dashboard/settings/accesses/users/${data.id}/history`}
+                label={t_i18n('History')}
+              />
             </Tabs>
           </Box>
           <Routes>
@@ -203,6 +206,12 @@ const RootUserComponent = ({ queryRef, userId, refetch }) => {
               path="/analytics"
               element={ (
                 <UserAnalytics data={data} refetch={refetch} />
+              )}
+            />
+            <Route
+              path="/history"
+              element={(
+                <UserHistoryTab data={data} refetch={refetch} />
               )}
             />
           </Routes>

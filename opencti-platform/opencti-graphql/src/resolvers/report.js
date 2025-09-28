@@ -1,6 +1,6 @@
 import {
   addReport,
-  findAll,
+  findReportPaginated,
   findById,
   reportContainsStixObjectOrStixRelationship,
   reportDeleteElementsCount,
@@ -25,11 +25,12 @@ import { distributionEntities } from '../database/middleware';
 import { ENTITY_TYPE_CONTAINER_REPORT } from '../schema/stixDomainObject';
 import { loadThroughDenormalized } from './stix';
 import { INPUT_PARTICIPANT } from '../schema/general';
+import { filterMembersWithUsersOrgs } from '../utils/access';
 
 const reportResolvers = {
   Query: {
     report: (_, { id }, context) => findById(context, context.user, id),
-    reports: (_, args, context) => findAll(context, context.user, args),
+    reports: (_, args, context) => findReportPaginated(context, context.user, args),
     reportsTimeSeries: (_, args, context) => {
       if (args.objectId && args.objectId.length > 0) {
         return reportsTimeSeriesByEntity(context, context.user, args);
@@ -60,7 +61,13 @@ const reportResolvers = {
   },
   Report: {
     deleteWithElementsCount: (report, _, context) => reportDeleteElementsCount(context, context.user, report.id),
-    objectParticipant: (container, _, context) => loadThroughDenormalized(context, context.user, container, INPUT_PARTICIPANT, { sortBy: 'user_email' }),
+    objectParticipant: async (container, _, context) => {
+      const participants = await loadThroughDenormalized(context, context.user, container, INPUT_PARTICIPANT, { sortBy: 'user_email' });
+      if (!participants) {
+        return [];
+      }
+      return filterMembersWithUsersOrgs(context, context.user, participants);
+    }
   },
   Mutation: {
     reportEdit: (_, { id }, context) => ({

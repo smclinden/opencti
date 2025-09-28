@@ -3,7 +3,8 @@ import {
   buildAdministratedOrganizations,
   childOrganizationsPaginated,
   editAuthorizedAuthorities,
-  findAll,
+  findOrganizationPaginated,
+  findAllSecurityOrganizations,
   findById,
   findGrantableGroups,
   organizationAdminAdd,
@@ -23,11 +24,14 @@ import {
 import type { Resolvers } from '../../generated/graphql';
 import type { BasicStoreEntityOrganization } from './organization-types';
 import { ENTITY_TYPE_WORKSPACE } from '../workspace/workspace-types';
+import { getAuthorizedMembers } from '../../utils/authorizedMembers';
+import { getUserAccessRight } from '../../utils/access';
 
 const organizationResolvers: Resolvers = {
   Query: {
     organization: (_, { id }, context) => findById(context, context.user, id),
-    organizations: (_, args, context) => findAll(context, context.user, args),
+    organizations: (_, args, context) => findOrganizationPaginated(context, context.user, args),
+    securityOrganizations: (_, args, context) => findAllSecurityOrganizations(context, context.user, args),
   },
   Organization: {
     sectors: (organization, args, context) => organizationSectorsPaginated<any>(context, context.user, organization.id, args),
@@ -36,6 +40,8 @@ const organizationResolvers: Resolvers = {
     parentOrganizations: (organization, args, context) => parentOrganizationsPaginated<BasicStoreEntityOrganization>(context, context.user, organization.id, args),
     default_dashboard: (current, _, context) => context.batch.idsBatchLoader.load({ id: current.default_dashboard, type: ENTITY_TYPE_WORKSPACE }),
     grantable_groups: (organization, _, context) => findGrantableGroups(context, context.user, organization),
+    authorized_members: (organization, _, context) => getAuthorizedMembers(context, context.user, organization),
+    currentUserAccessRight: (organization, _, context) => getUserAccessRight(context.user, organization),
   },
   User: {
     administrated_organizations: (user, _, context) => buildAdministratedOrganizations(context, context.user, user),

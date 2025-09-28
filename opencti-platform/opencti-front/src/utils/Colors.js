@@ -32,6 +32,11 @@ export const stringToColour = (str, reversed = false) => {
 
 export const itemColor = (type, dark = false, reversed = false) => {
   switch (type) {
+    case 'Restricted':
+      if (dark) {
+        return '#424242';
+      }
+      return '#B0B0B0';
     case 'Attack-Pattern':
       if (dark) {
         return '#d4e157';
@@ -183,6 +188,7 @@ export const itemColor = (type, dark = false, reversed = false) => {
         return '#006064';
       }
       return '#00acc1';
+    case 'Threat-Actor':
     case 'Threat-Actor-Group':
       if (dark) {
         return '#880e4f';
@@ -290,6 +296,10 @@ export const itemColor = (type, dark = false, reversed = false) => {
     case 'uses':
     case 'located-at':
     case 'related-to':
+    case 'technology-from':
+    case 'technology-to':
+    case 'technology':
+    case 'demonstrates':
     case 'mitigates':
     case 'impersonates':
     case 'indicates':

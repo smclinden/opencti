@@ -2,11 +2,10 @@ import { ApolloServer } from '@apollo/server';
 import { ApolloArmor } from '@escape.tech/graphql-armor';
 import { dissocPath } from 'ramda';
 import { createValidation as createAliasBatch } from 'graphql-no-alias';
-import { constraintDirectiveDocumentation } from 'graphql-constraint-directive';
 import { GraphQLError } from 'graphql/error';
 import { createApollo4QueryValidationPlugin } from 'graphql-constraint-directive/apollo4';
 import createSchema from './schema';
-import conf, { DEV_MODE, ENABLED_METRICS, ENABLED_TRACING, GRAPHQL_ARMOR_DISABLED, PLAYGROUND_ENABLED, PLAYGROUND_INTROSPECTION_DISABLED } from '../config/conf';
+import conf, { DEV_MODE, ENABLED_METRICS, ENABLED_TRACING, GRAPHQL_ARMOR_DISABLED, logApp, PLAYGROUND_ENABLED, PLAYGROUND_INTROSPECTION_DISABLED } from '../config/conf';
 import { ForbiddenAccess } from '../config/errors';
 import loggerPlugin from './loggerPlugin';
 import telemetryPlugin from './telemetryPlugin';
@@ -14,7 +13,7 @@ import tracingPlugin from './tracingPlugin';
 import httpResponsePlugin from './httpResponsePlugin';
 
 const createApolloServer = () => {
-  let schema = createSchema();
+  const schema = createSchema();
   // graphql-constraint-directive plugin configuration
   const formats = {
     'not-blank': (value) => {
@@ -25,7 +24,6 @@ const createApolloServer = () => {
     }
   };
   const constraintPlugin = createApollo4QueryValidationPlugin({ formats });
-  schema = constraintDirectiveDocumentation()(schema);
   const apolloPlugins = [loggerPlugin, httpResponsePlugin, constraintPlugin];
   // Protect batch graphql through alias usage
   const batchPermissions = {
@@ -72,7 +70,7 @@ const createApolloServer = () => {
     requestDidStart: (requestContext) => {
       const { contextValue, request } = requestContext;
       // Is schema have introspection request
-      if (['__schema'].some((pattern) => request.query.includes(pattern))) {
+      if (request.query && ['__schema'].some((pattern) => request.query.includes(pattern))) {
         // If introspection explicitly disabled or user is not authenticated
         if (!PLAYGROUND_ENABLED || PLAYGROUND_INTROSPECTION_DISABLED || !contextValue?.user) {
           throw ForbiddenAccess('GraphQL introspection not authorized!');
@@ -87,6 +85,20 @@ const createApolloServer = () => {
   if (ENABLED_METRICS) {
     apolloPlugins.push(telemetryPlugin);
   }
+
+  apolloPlugins.push({
+    // see https://www.apollographql.com/docs/apollo-server/integrations/plugins-event-reference
+    startupDidFail: ({ error }) => {
+      logApp.error('[APOLLO] Startup failed', { cause: error });
+    },
+    contextCreationDidFail: ({ error }) => {
+      logApp.warn('[APOLLO] Context creation failed', { cause: error });
+    },
+    unexpectedErrorProcessingRequest: ({ error }) => {
+      logApp.warn('[APOLLO] Unexpected error processing request', { cause: error });
+    },
+  });
+
   const apolloServer = new ApolloServer({
     schema,
     introspection: true, // Will be disabled by plugin if needed
@@ -95,6 +107,12 @@ const createApolloServer = () => {
     csrfPrevention: false, // CSRF is handled by helmet
     tracing: DEV_MODE,
     plugins: apolloPlugins,
+    logger: {
+      debug: (msg) => logApp.debug(`[APOLLO] ${msg}`),
+      info: (msg) => logApp.info(`[APOLLO] ${msg}`),
+      warn: (msg) => logApp.warn(`[APOLLO] ${msg}`),
+      error: (msg) => logApp.error(`[APOLLO] ${msg}`),
+    },
     formatError: (error) => {
       // To maintain compatibility with client in version 3.
       const enrichedError = { ...error, name: error.extensions?.code ?? error.name };

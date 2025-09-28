@@ -2,9 +2,6 @@
 kind: pipeline
 name: opencti-tests
 
-node:
-  env: kubernetes
-
 steps:
   - name: Runner information
     image: alpine:3.19
@@ -27,6 +24,38 @@ steps:
       - echo "[INFO] using client-python on branch $(git branch --show-current)"
       - git log -n 1
 
+  - name: backend-verify-licenses
+    image: nikolaik/python-nodejs:python3.11-nodejs22-alpine
+    commands:
+      - apk add build-base git libffi-dev cargo
+      - pip3 install --upgrade setuptools
+      - cd "$DRONE_WORKSPACE/client-python"
+      - pip install -r requirements.txt
+      - pip install -e .[dev,doc]
+      - cd "$DRONE_WORKSPACE/opencti-platform/opencti-graphql"
+      - yarn install
+      - yarn verify-licenses
+    depends_on:
+      - dependencies-checkout
+
+  - name: frontend-verify-licenses
+    image: node:22.14.0
+    commands:
+      - cd ./opencti-platform/opencti-front
+      - yarn install
+      - yarn verify-licenses
+    depends_on:
+      - dependencies-checkout
+
+  - name: generate-licenses
+    image: node:22.14.0
+    commands:
+      - chmod 777 scripts/*
+      - ./scripts/generate-licenses.sh
+      - test -f ./licenses/third-party-licenses.txt
+    depends_on:
+      - backend-verify-licenses
+      - frontend-verify-licenses
 
   - name: api-tests
     image: nikolaik/python-nodejs:python3.11-nodejs22-alpine
@@ -70,6 +99,7 @@ steps:
       - NODE_OPTIONS=--max_old_space_size=8192 yarn test
     depends_on:
       - dependencies-checkout
+      - generate-licenses
 
   - name: api-coverage
     image: plugins/codecov
@@ -95,9 +125,11 @@ steps:
       - yarn check-ts
       - yarn lint
       - NODE_OPTIONS=--max_old_space_size=8192 yarn test
+    depends_on:
+        - generate-licenses
 
   - name: frontend-e2e-tests
-    image: node:22.17.1
+    image: node:22.18.0
     volumes:
     - name: cache-node-frontend-e2e
       path: /drone/src/opencti-platform/opencti-front/node_modules
@@ -118,7 +150,7 @@ steps:
       - frontend-tests
 
   - name: upload-build-artefact
-    image: node:22.17.1
+    image: node:22.18.0
     failure: ignore
     when:
       status:
@@ -150,7 +182,7 @@ steps:
       - api-tests
 
   - name: frontend-verify-translation
-    image: node:22.17.1
+    image: node:22.18.0
     commands:
       - cd opencti-platform/opencti-front
       - node script/verify-translation.js
@@ -208,19 +240,19 @@ services:
   - name: redis
     image: redis:8.0.3
   - name: elastic
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.0
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.2
     environment:
       discovery.type: single-node
       xpack.security.enabled: false
       ES_JAVA_OPTS: -Xms2g -Xmx2g
   - name: minio
-    image: minio/minio:RELEASE.2023-07-07T07-13-57Z
+    image: minio/minio:RELEASE.2025-06-13T11-33-47Z
     environment:
       MINIO_ROOT_USER: ChangeMe
       MINIO_ROOT_PASSWORD: ChangeMe
     command: [server, /data]
   - name: rabbitmq
-    image: rabbitmq:4.1-management
+    image: rabbitmq:4.1.4-management
 
   - name: opencti-raw-start
     image: nikolaik/python-nodejs:python3.11-nodejs22-alpine

@@ -16,15 +16,16 @@ import { enableCEAndUnSetOrganization, enableEEAndSetOrganization, queryAsAdminW
 import { getOrganizationEntity } from '../../utils/domainQueryHelper';
 import { ActionStatus, type RequestAccessAction } from '../../../src/modules/requestAccess/requestAccess-domain';
 import { ENTITY_TYPE_CONTAINER_CASE_RFI } from '../../../src/modules/case/case-rfi/case-rfi-types';
-import { findAllTemplates, } from '../../../src/domain/status';
+import { findTemplatePaginated, } from '../../../src/domain/status';
 import { FilterMode, OrderingMode, type RequestAccessConfigureInput, RequestAccessType, type StatusAddInput, StatusOrdering, StatusScope } from '../../../src/generated/graphql';
 import { logApp } from '../../../src/config/conf';
 import { ENTITY_TYPE_STATUS } from '../../../src/schema/internalObject';
-import { listAllEntities } from '../../../src/database/middleware-loader';
+import { fullEntitiesList } from '../../../src/database/middleware-loader';
 import type { BasicWorkflowStatus } from '../../../src/types/store';
 import { internalDeleteElementById } from '../../../src/database/middleware';
 import { MEMBER_ACCESS_RIGHT_ADMIN, MEMBER_ACCESS_RIGHT_EDIT } from '../../../src/utils/access';
 import { OPENCTI_ADMIN_UUID } from '../../../src/schema/general';
+import { ENTITY_TYPE_MALWARE } from '../../../src/schema/stixDomainObject';
 
 export const CREATE_REQUEST_ACCESS_QUERY = gql`
     mutation RequestAccessAdd($input: RequestAccessAddInput!) {
@@ -257,7 +258,7 @@ describe('Add Request Access to an entity and create an RFI.', async () => {
 
   it('should request access have more status and be configurable', async () => {
     // ADD 2 status in the list of request access available status
-    const allTemplates = await findAllTemplates(testContext, ADMIN_USER, {});
+    const allTemplates = await findTemplatePaginated(testContext, ADMIN_USER, {});
     const pendingTemplate = allTemplates.edges.find((template) => template.node.name === 'PENDING');
     expect(pendingTemplate?.node.name).toBe('PENDING');
     logApp.info(`[TEST] pendingTemplate:${pendingTemplate?.node.id}`, { pendingTemplate });
@@ -311,17 +312,16 @@ describe('Add Request Access to an entity and create an RFI.', async () => {
         mode: FilterMode.And,
         filters: [{ key: ['type'], values: [ENTITY_TYPE_CONTAINER_CASE_RFI] }, { key: ['scope'], values: [StatusScope.RequestAccess] }],
         filterGroups: [],
-      },
-      connectionFormat: false
+      }
     };
-    const allRequestAccessStatuses = await listAllEntities<BasicWorkflowStatus>(testContext, ADMIN_USER, [ENTITY_TYPE_STATUS], argsFilter);
+    const allRequestAccessStatuses = await fullEntitiesList<BasicWorkflowStatus>(testContext, ADMIN_USER, [ENTITY_TYPE_STATUS], argsFilter);
     logApp.info('[TEST] allRequestAccessStatuses:', { allRequestAccessStatuses });
     const closedStatus = allRequestAccessStatuses.find((status) => status.template_id === closedTemplate?.node.id);
     logApp.info('[TEST] closedStatus:', { closedStatus });
   });
 
   it('should request access be configurable', async () => {
-    const allTemplates = await findAllTemplates(testContext, ADMIN_USER, {});
+    const allTemplates = await findTemplatePaginated(testContext, ADMIN_USER, {});
 
     // All of them are created in data initialization
     const pendingTemplate = allTemplates.edges.find((template) => template.node.name === 'PENDING');
@@ -390,7 +390,7 @@ describe('Add Request Access to an entity and create an RFI.', async () => {
   });
 
   it('should request access be configured', async () => {
-    const allTemplates = await findAllTemplates(testContext, ADMIN_USER, {});
+    const allTemplates = await findTemplatePaginated(testContext, ADMIN_USER, {});
     const declinedTemplate = allTemplates.edges.find((template) => template.node.name === 'DECLINED');
     const approvedTemplate = allTemplates.edges.find((template) => template.node.name === 'APPROVED');
     expect(declinedTemplate?.node.name).toBe('DECLINED');
@@ -604,9 +604,9 @@ describe('Add Request Access to an entity and create an RFI.', async () => {
   });
 
   it('should remove platform organization and test data', async () => {
-    await internalDeleteElementById(testContext, ADMIN_USER, malwareId);
-    await internalDeleteElementById(testContext, ADMIN_USER, caseRfiIdForApproval);
-    await internalDeleteElementById(testContext, ADMIN_USER, caseRfiIdForReject);
+    await internalDeleteElementById(testContext, ADMIN_USER, malwareId, ENTITY_TYPE_MALWARE);
+    await internalDeleteElementById(testContext, ADMIN_USER, caseRfiIdForApproval, ENTITY_TYPE_CONTAINER_CASE_RFI);
+    await internalDeleteElementById(testContext, ADMIN_USER, caseRfiIdForReject, ENTITY_TYPE_CONTAINER_CASE_RFI);
 
     // revert platform orga
     await enableCEAndUnSetOrganization();

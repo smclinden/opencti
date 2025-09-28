@@ -4,20 +4,7 @@ import { clearIntervalAsync, setIntervalAsync } from 'set-interval-async/dynamic
 import * as R from 'ramda';
 import { Promise as BluePromise } from 'bluebird';
 import { lockResources } from '../lock/master-lock';
-import {
-  ACTION_TYPE_ADD,
-  ACTION_TYPE_ENRICHMENT,
-  ACTION_TYPE_MERGE,
-  ACTION_TYPE_PROMOTE,
-  ACTION_TYPE_REMOVE,
-  ACTION_TYPE_REPLACE,
-  ACTION_TYPE_RULE_APPLY,
-  ACTION_TYPE_RULE_CLEAR,
-  ACTION_TYPE_RULE_ELEMENT_RESCAN,
-  buildQueryFilters,
-  findAll,
-  updateTask
-} from '../domain/backgroundTask';
+import { buildQueryFilters, findBackgroundTask, updateTask } from '../domain/backgroundTask';
 import conf, { booleanConf, logApp } from '../config/conf';
 import { resolveUserByIdFromCache } from '../domain/user';
 import { storeLoadByIdsWithRefs } from '../database/middleware';
@@ -27,21 +14,31 @@ import { elList } from '../database/engine';
 import { FunctionalError, TYPE_LOCK_ERROR } from '../config/errors';
 import { ABSTRACT_STIX_CORE_RELATIONSHIP, INPUT_OBJECTS, RULE_PREFIX } from '../schema/general';
 import { executionContext, isUserInPlatformOrganization, RULE_MANAGER_USER, SYSTEM_USER } from '../utils/access';
-import { buildEntityFilters, internalFindByIds, internalLoadById, listAllRelations } from '../database/middleware-loader';
+import { buildEntityFilters, internalFindByIds, internalLoadById, fullRelationsList } from '../database/middleware-loader';
 import { getRule } from '../domain/rules';
 import { ENTITY_TYPE_INDICATOR } from '../modules/indicator/indicator-types';
 import { isStixCyberObservable } from '../schema/stixCyberObservable';
 import { generateIndicatorFromObservable } from '../domain/stixCyberObservable';
 import {
+  ACTION_TYPE_ADD,
   ACTION_TYPE_ADD_GROUPS,
   ACTION_TYPE_ADD_ORGANIZATIONS,
   ACTION_TYPE_COMPLETE_DELETE,
   ACTION_TYPE_DELETE,
+  ACTION_TYPE_ENRICHMENT,
+  ACTION_TYPE_MERGE,
+  ACTION_TYPE_PROMOTE,
+  ACTION_TYPE_REMOVE,
   ACTION_TYPE_REMOVE_AUTH_MEMBERS,
   ACTION_TYPE_REMOVE_FROM_DRAFT,
   ACTION_TYPE_REMOVE_GROUPS,
   ACTION_TYPE_REMOVE_ORGANIZATIONS,
+  ACTION_TYPE_REPLACE,
   ACTION_TYPE_RESTORE,
+  ACTION_TYPE_RULE_APPLY,
+  ACTION_TYPE_RULE_CLEAR,
+  ACTION_TYPE_RULE_ELEMENT_RESCAN,
+  ACTION_TYPE_SEND_EMAIL,
   ACTION_TYPE_SHARE,
   ACTION_TYPE_SHARE_MULTIPLE,
   ACTION_TYPE_UNSHARE,
@@ -78,8 +75,7 @@ const TASK_CONCURRENCY = parseInt(conf.get('task_scheduler:max_concurrency') ?? 
 let running = false;
 
 const findTasksToExecute = async (context) => {
-  return findAll(context, SYSTEM_USER, {
-    connectionFormat: false,
+  return findBackgroundTask(context, SYSTEM_USER, {
     orderBy: 'created_at',
     orderMode: 'asc',
     limit: 1,
@@ -99,7 +95,7 @@ export const taskRule = async (context, user, task, callback) => {
     const { scan } = ruleDefinition;
     // task_position is no longer used, but we still handle it to properly process task that were processing before task migrated to worker
     const options = { baseData: true, orderMode: 'asc', orderBy: 'updated_at', ...buildEntityFilters(scan.types, scan), after: task_position };
-    const finalOpts = { ...options, connectionFormat: false, callback };
+    const finalOpts = { ...options, callback };
     await elList(context, RULE_MANAGER_USER, READ_DATA_INDICES_WITHOUT_INFERRED, finalOpts);
   } else {
     const filters = {
@@ -109,7 +105,7 @@ export const taskRule = async (context, user, task, callback) => {
     };
     // task_position is no longer used, but we still handle it to properly process task that were processing before task migrated to worker
     const options = { baseData: true, orderMode: 'asc', orderBy: 'updated_at', filters, after: task_position };
-    const finalOpts = { ...options, connectionFormat: false, callback };
+    const finalOpts = { ...options, callback };
     await elList(context, RULE_MANAGER_USER, READ_DATA_INDICES, finalOpts);
   }
 };
@@ -117,7 +113,7 @@ export const taskRule = async (context, user, task, callback) => {
 export const taskQuery = async (context, user, task, callback) => {
   const { task_position, task_filters, task_search = null, task_excluded_ids = [], scope, task_order_mode } = task;
   const options = await buildQueryFilters(context, user, task_filters, task_search, task_position, scope, task_order_mode, task_excluded_ids);
-  const finalOpts = { ...options, connectionFormat: false, baseData: true, callback };
+  const finalOpts = { ...options, baseData: true, callback };
   await elList(context, user, READ_DATA_INDICES, finalOpts);
 };
 
@@ -150,7 +146,8 @@ const throwErrorInDraftContext = (context, user, actionType) => {
       || actionType === ACTION_TYPE_SHARE
       || actionType === ACTION_TYPE_UNSHARE
       || actionType === ACTION_TYPE_SHARE_MULTIPLE
-      || actionType === ACTION_TYPE_UNSHARE_MULTIPLE) {
+      || actionType === ACTION_TYPE_UNSHARE_MULTIPLE
+      || actionType === ACTION_TYPE_SEND_EMAIL) {
     throw FunctionalError('Cannot execute this task type in draft', { actionType });
   }
 };
@@ -244,6 +241,10 @@ const baseOperationBuilder = (actionType, operations, element) => {
     baseOperationObject.opencti_operation = 'remove_groups';
     baseOperationObject.group_ids = operations[0].context.values;
   }
+  if (actionType === ACTION_TYPE_SEND_EMAIL) {
+    baseOperationObject.opencti_operation = 'send_email';
+    baseOperationObject.template_id = operations[0].context.values;
+  }
   return baseOperationObject;
 };
 
@@ -289,6 +290,7 @@ const buildBundleElement = (element, actionType, operations) => {
 };
 
 const standardOperationCallback = async (context, user, task, actionType, operations) => {
+  let totalProcessed = task.task_processed_number;
   return async (elements) => {
     // Build limited stix object to limit memory footprint
     const objects = [];
@@ -308,7 +310,8 @@ const standardOperationCallback = async (context, user, task, actionType, operat
     // Send actions to queue
     await sendResultToQueue(context, user, task, objects);
     // Update task
-    await updateTask(context, task.id, { task_processed_number: task.task_processed_number + elements.length });
+    totalProcessed += elements.length;
+    await updateTask(context, task.id, { task_processed_number: totalProcessed });
   };
 };
 
@@ -319,19 +322,19 @@ export const buildContainersElementsBundle = async (context, user, containers, e
     const element = elements[index];
     elementIds.add(element.internal_id);
     elementStandardIds.add(element.standard_id);
-    if (withNeighbours) {
-      if (element.fromId) elementIds.add(element.fromId);
-      if (element.toId) elementIds.add(element.toId);
-      const callback = (relations) => {
-        relations.forEach((relation) => {
-          elementIds.add(relation.fromId);
-          elementIds.add(relation.toId);
-          elementIds.add(relation.id);
-        });
-      };
-      const args = { fromOrToId: Array.from(elementIds), baseData: true, callback };
-      await listAllRelations(context, user, ABSTRACT_STIX_CORE_RELATIONSHIP, args);
-    }
+    if (element.fromId) elementIds.add(element.fromId);
+    if (element.toId) elementIds.add(element.toId);
+  }
+  if (withNeighbours) {
+    const callback = (relations) => {
+      relations.forEach((relation) => {
+        elementIds.add(relation.fromId);
+        elementIds.add(relation.toId);
+        elementIds.add(relation.id);
+      });
+    };
+    const args = { fromOrToId: Array.from(elementIds), baseData: true, callback };
+    await fullRelationsList(context, user, ABSTRACT_STIX_CORE_RELATIONSHIP, args);
   }
   // Build limited stix object to limit memory footprint
   const containerOperations = [{
@@ -363,16 +366,19 @@ export const buildContainersElementsBundle = async (context, user, containers, e
 const containerOperationCallback = async (context, user, task, containers, operations) => {
   const withNeighbours = operations[0].context.options?.includeNeighbours;
   const operationType = operations[0].type;
+  let totalProcessed = task.task_processed_number;
   return async (elements) => {
     const objects = await buildContainersElementsBundle(context, user, containers, elements, withNeighbours, operationType);
     // Send actions to queue
     await sendResultToQueue(context, user, task, objects);
     // Update task
-    await updateTask(context, task.id, { task_processed_number: task.task_processed_number + elements.length });
+    totalProcessed += elements.length;
+    await updateTask(context, task.id, { task_processed_number: totalProcessed });
   };
 };
 
 const promoteOperationCallback = async (context, user, task, container) => {
+  let totalProcessed = task.task_processed_number;
   return async (elements) => {
     const objects = [];
     const ids = elements.map((e) => e.internal_id);
@@ -473,11 +479,13 @@ const promoteOperationCallback = async (context, user, task, container) => {
     }
 
     // Update task
-    await updateTask(context, task.id, { task_processed_number: task.task_processed_number + elements.length });
+    totalProcessed += elements.length;
+    await updateTask(context, task.id, { task_processed_number: totalProcessed });
   };
 };
 
 const sharingOperationCallback = async (context, user, task, actionType, operations) => {
+  let totalProcessed = task.task_processed_number;
   return async (elements) => {
     const objects = [];
     for (let index = 0; index < elements.length; index += 1) {
@@ -518,7 +526,8 @@ const sharingOperationCallback = async (context, user, task, actionType, operati
       await sendResultToQueue(context, user, task, objects);
     }
     // Update task
-    await updateTask(context, task.id, { task_processed_number: task.task_processed_number + elements.length });
+    totalProcessed += elements.length;
+    await updateTask(context, task.id, { task_processed_number: totalProcessed });
   };
 };
 

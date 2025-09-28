@@ -10,10 +10,11 @@ import {
   CONTEXT_ENTITY_TYPE_FILTER,
   CONTEXT_OBJECT_LABEL_FILTER,
   CONTEXT_OBJECT_MARKING_FILTER,
-  filterKeysWithMeValue,
+  FILTER_KEYS_WITH_ME_VALUE,
   INSTANCE_DYNAMIC_REGARDING_OF,
   INSTANCE_REGARDING_OF,
   LABEL_FILTER,
+  LAST_PIR_SCORE_DATE_FILTER_PREFIX,
   ME_FILTER_VALUE,
   MEMBERS_GROUP_FILTER,
   MEMBERS_ORGANIZATION_FILTER,
@@ -22,10 +23,11 @@ import {
   OPINIONS_METRICS_MEAN_FILTER,
   OPINIONS_METRICS_MIN_FILTER,
   OPINIONS_METRICS_TOTAL_FILTER,
+  PIR_SCORE_FILTER_PREFIX,
   RELATION_DYNAMIC_FROM_FILTER,
   RELATION_DYNAMIC_TO_FILTER,
   SIGHTED_BY_FILTER,
-  specialFilterKeys
+  SPECIAL_FILTER_KEYS
 } from './filtering-constants';
 import { STIX_SIGHTING_RELATIONSHIP } from '../../schema/stixSightingRelationship';
 import { STIX_CORE_RELATIONSHIPS } from '../../schema/stixCoreRelationship';
@@ -141,12 +143,31 @@ export const extractFilterKeys = (filterGroup: FilterGroup): string[] => {
 };
 
 /**
+ * extract all the filters from a filter group for specified keys
+ */
+export const extractFiltersFromGroup = (inputFilters: FilterGroup, keysToKeep: string[]): Filter[] => {
+  const { filters = [], filterGroups = [] } = inputFilters;
+  const filteredFilters = filters.filter((f) => (Array.isArray(f.key) ? f.key.some((k) => keysToKeep.includes(k)) : keysToKeep.includes(f.key)));
+  filteredFilters.push(...filterGroups.map((group) => extractFiltersFromGroup(group, keysToKeep)).flat());
+  return filteredFilters;
+};
+
+/**
  * extract all the values (ids) from a filter group
  * if key is specified: extract all the values corresponding to the specified keys
  * if key is specified and reverse=true: extract all the ids NOT corresponding to any key
+ * if lookInDynamicFilters = true: also extract values corresponding to the key in dynamic filters
  */
-export const extractFilterGroupValues = (inputFilters: FilterGroup, key: string | string[] | null = null, reverse = false): string[] => {
+export const extractFilterGroupValues = (
+  inputFilters: FilterGroup,
+  key: string | string[] | null = null,
+  reverse = false,
+  lookInDynamicFilters = false,
+): string[] => {
   const keysToKeep = Array.isArray(key) ? key : [key];
+  if (lookInDynamicFilters) {
+    keysToKeep.push(...[INSTANCE_DYNAMIC_REGARDING_OF, RELATION_DYNAMIC_TO_FILTER, RELATION_DYNAMIC_FROM_FILTER]);
+  }
   const { filters = [], filterGroups = [] } = inputFilters;
   let filteredFilters = [];
   if (key) {
@@ -165,7 +186,16 @@ export const extractFilterGroupValues = (inputFilters: FilterGroup, key: string 
     if (f.key.includes(INSTANCE_REGARDING_OF)) {
       const regardingIds = f.values.find((v) => v.key === 'id')?.values ?? [];
       ids.push(...regardingIds);
-    } else if (f.key.includes(INSTANCE_DYNAMIC_REGARDING_OF) || f.key.includes(RELATION_DYNAMIC_FROM_FILTER) || f.key.includes(RELATION_DYNAMIC_TO_FILTER)) {
+    } else if (f.key.includes(INSTANCE_DYNAMIC_REGARDING_OF)) {
+      // values of 'dynamic' subfilter are filters we should look for
+      const dynamicValues = f.values.find((v) => v.key === 'dynamic')?.values ?? [];
+      const dynamicIds = dynamicValues.map((v: FilterGroup) => extractFilterGroupValues(v, key, reverse)).flat();
+      ids.push(...dynamicIds);
+      ids.push('dynamic');
+    } else if (f.key.includes(RELATION_DYNAMIC_FROM_FILTER) || f.key.includes(RELATION_DYNAMIC_TO_FILTER)) {
+      // values are filters we should look for
+      const dynamicIds = f.values.map((v) => extractFilterGroupValues(v, key, reverse)).flat();
+      ids.push(...dynamicIds);
       ids.push('dynamic');
     } else {
       ids.push(...f.values);
@@ -244,7 +274,7 @@ export const addFilter = (filterGroup: FilterGroup | undefined | null, newKey: s
         mode: localMode
       },
     ],
-    filterGroups: filterGroup ? [filterGroup] : [],
+    filterGroups: filterGroup && isFilterGroupNotEmpty(filterGroup) ? [filterGroup] : [],
   } as FilterGroup;
 };
 
@@ -361,7 +391,7 @@ export const replaceEnrichValuesInFilters = (filterGroup: FilterGroup, userId: s
   filtersResult.filters.forEach((filter) => {
     const { key } = filter;
     const arrayKeys = Array.isArray(key) ? key : [key];
-    if (arrayKeys.some((filterKey) => filterKeysWithMeValue.includes(filterKey))) {
+    if (arrayKeys.some((filterKey) => FILTER_KEYS_WITH_ME_VALUE.includes(filterKey))) {
       // replace ME_FILTER_VALUE with the id of the user
       if (filter.values.includes(ME_FILTER_VALUE)) {
         // eslint-disable-next-line no-param-reassign
@@ -386,15 +416,9 @@ export const replaceEnrichValuesInFilters = (filterGroup: FilterGroup, userId: s
   return filtersResult;
 };
 
-/**
- * Check the filter keys exist in the schema
- */
-const checkFilterKeys = (filterGroup: FilterGroup) => {
-  // TODO improvement: check filters keys correspond to the entity types if types is given
-  const keys = extractFilterKeys(filterGroup)
-    .map((k) => k.split('.')[0]); // keep only the first part of the key to handle composed keys
-  if (keys.length > 0) {
-    let incorrectKeys = keys;
+let availableKeysCache: Set<string>;
+const getAvailableKeys = () => {
+  if (!availableKeysCache) {
     const availableAttributes = schemaAttributesDefinition.getAllAttributesNames();
     const availableRefRelations = schemaRelationsRefDefinition.getAllInputNames();
     const availableConvertedRefRelations = getConvertedRelationsNames(schemaRelationsRefDefinition.getAllDatabaseName());
@@ -407,15 +431,27 @@ const checkFilterKeys = (filterGroup: FilterGroup) => {
       .concat(availableConvertedStixCoreRelationships)
       .concat(INTERNAL_RELATIONSHIPS)
       .concat(availableConvertedInternalRelations)
-      .concat(specialFilterKeys);
-    keys.forEach((k) => {
-      if (availableKeys.includes(k) || k.startsWith(RULE_PREFIX)) {
-        incorrectKeys = incorrectKeys.filter((n) => n !== k);
-      }
-    });
-    if (incorrectKeys.length > 0) {
-      throw UnsupportedError('incorrect filter keys not existing in any schema definition', { keys: incorrectKeys });
-    }
+      .concat(SPECIAL_FILTER_KEYS);
+    availableKeysCache = new Set(availableKeys);
+  }
+  return availableKeysCache;
+};
+
+/**
+ * Check the filter keys exist in the schema
+ */
+const checkFilterKeys = (filterGroup: FilterGroup) => {
+  // TODO improvement: check filters keys correspond to the entity types if types is given
+  const incorrectKeys = extractFilterKeys(filterGroup)
+    .map((k) => k.split('.')[0]) // keep only the first part of the key to handle composed keys
+    .filter((k) => !(getAvailableKeys().has(k)
+      || k.startsWith(RULE_PREFIX)
+      || k.startsWith(PIR_SCORE_FILTER_PREFIX)
+      || k.startsWith(LAST_PIR_SCORE_DATE_FILTER_PREFIX)
+    ));
+
+  if (incorrectKeys.length > 0) {
+    throw UnsupportedError('incorrect filter keys not existing in any schema definition', { keys: incorrectKeys });
   }
 };
 
@@ -537,4 +573,17 @@ export const filtersEntityIdsMappingResult = (inputFilters: FilterGroup, keysToR
     filters: newFilters,
     filterGroups: newFilterGroups,
   };
+};
+
+// TODO: remove when dynamicFrom & dynamicTo are removed from widgets and only handled in filters
+export const addDynamicFromAndToToFilters = (args: any): FilterGroup | undefined | null => {
+  const { filters, dynamicFrom, dynamicTo } = args;
+  let finalFilters = filters;
+  if (dynamicFrom && isFilterGroupNotEmpty(dynamicFrom)) {
+    finalFilters = addFilter(finalFilters, RELATION_DYNAMIC_FROM_FILTER, dynamicFrom);
+  }
+  if (dynamicTo && isFilterGroupNotEmpty(dynamicTo)) {
+    finalFilters = addFilter(finalFilters, RELATION_DYNAMIC_TO_FILTER, dynamicTo);
+  }
+  return finalFilters;
 };

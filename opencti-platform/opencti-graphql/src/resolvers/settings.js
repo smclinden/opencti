@@ -7,8 +7,8 @@ import {
   getMemoryStatistics,
   getMessagesFilteredByRecipients,
   getProtectedSensitiveConfig,
+  getPublicSettings,
   getSettings,
-  isPlaygroundEnabled,
   settingDeleteMessage,
   settingEditMessage,
   settingsCleanContext,
@@ -24,11 +24,13 @@ import { READ_DATA_INDICES } from '../database/utils';
 import { internalFindByIds } from '../database/middleware-loader';
 import { getEnterpriseEditionInfo } from '../modules/settings/licensing';
 import { isRequestAccessEnabled } from '../modules/requestAccess/requestAccess-domain';
+import { CguStatus } from '../generated/graphql';
 
 const settingsResolvers = {
   Query: {
     about: () => getApplicationInfo(),
     settings: (_, __, context) => getSettings(context),
+    publicSettings: (_, __, context) => getPublicSettings(context),
   },
   AppDebugStatistics: {
     objects: (_, __, context) => elAggregationCount(context, context.user, READ_DATA_INDICES, { types: ['Stix-Object'], field: 'entity_type' }),
@@ -52,9 +54,10 @@ const settingsResolvers = {
     editContext: (settings) => fetchEditContext(settings.id),
     platform_messages: (settings, _, context) => getMessagesFilteredByRecipients(context.user, settings),
     messages_administration: (settings) => JSON.parse(settings.platform_messages ?? '[]'),
-    playground_enabled: () => isPlaygroundEnabled(),
     platform_enterprise_edition: (settings) => getEnterpriseEditionInfo(settings),
     request_access_enabled: (_, __, context) => isRequestAccessEnabled(context, context.user),
+    platform_ai_enabled: (settings) => settings.platform_ai_enabled ?? true,
+    filigran_chatbot_ai_cgu_status: (settings) => settings.filigran_chatbot_ai_cgu_status ?? CguStatus.Pending,
   },
   AppInfo: {
     memory: getMemoryStatistics(),

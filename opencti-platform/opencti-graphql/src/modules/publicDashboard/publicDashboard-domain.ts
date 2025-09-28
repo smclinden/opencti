@@ -1,10 +1,10 @@
 import { Promise as BluePromise } from 'bluebird';
 import type { AuthContext, AuthUser } from '../../types/user';
-import { internalLoadById, listEntitiesPaginated, storeLoadById } from '../../database/middleware-loader';
+import { internalLoadById, pageEntitiesConnection, storeLoadById } from '../../database/middleware-loader';
 import { type BasicStoreEntityPublicDashboard, ENTITY_TYPE_PUBLIC_DASHBOARD, type PublicDashboardCached } from './publicDashboard-types';
 import { createEntity, deleteElementById, loadEntity, updateAttribute } from '../../database/middleware';
 import { type BasicStoreEntityWorkspace } from '../workspace/workspace-types';
-import { fromBase64, isNotEmptyField, toBase64 } from '../../database/utils';
+import { isNotEmptyField } from '../../database/utils';
 import { notify } from '../../database/redis';
 import { BUS_TOPICS, logApp } from '../../config/conf';
 import {
@@ -27,26 +27,27 @@ import {
 import { ForbiddenAccess, FunctionalError, UnsupportedError } from '../../config/errors';
 import { getUserAccessRight, MEMBER_ACCESS_RIGHT_ADMIN, SYSTEM_USER } from '../../utils/access';
 import { publishUserAction } from '../../listener/UserActionListener';
-import { findAll as findAllWorkspaces } from '../workspace/workspace-domain';
+import { findAllWorkspaces } from '../workspace/workspace-domain';
 import { ENTITY_TYPE_MARKING_DEFINITION } from '../../schema/stixMetaObject';
 import { getEntitiesMapFromCache } from '../../database/cache';
 import type { BasicStoreRelation, NumberResult, StoreEntityConnection, StoreMarkingDefinition, StoreRelationConnection } from '../../types/store';
 import { checkUserIsAdminOnDashboard, getWidgetArguments } from './publicDashboard-utils';
 import {
-  findAll as stixCoreObjects,
+  findStixCoreObjectPaginated,
   stixCoreObjectsDistribution,
   stixCoreObjectsDistributionByEntity,
   stixCoreObjectsMultiTimeSeries,
   stixCoreObjectsNumber
 } from '../../domain/stixCoreObject';
 import { ABSTRACT_STIX_CORE_OBJECT } from '../../schema/general';
-import { findAll as stixRelationships, stixRelationshipsDistribution, stixRelationshipsMultiTimeSeries, stixRelationshipsNumber } from '../../domain/stixRelationship';
+import { findStixRelationPaginated, stixRelationshipsDistribution, stixRelationshipsMultiTimeSeries, stixRelationshipsNumber } from '../../domain/stixRelationship';
 import { bookmarks, checkUserCanShareMarkings } from '../../domain/user';
 import { daysAgo } from '../../utils/format';
 import { isStixCoreObject } from '../../schema/stixCoreObject';
 import { ES_MAX_CONCURRENCY } from '../../database/engine';
 import { findById as findMarkingDefinitionById } from '../../domain/markingDefinition';
 import { addFilter } from '../../utils/filtering/filtering-utils';
+import { fromB64, toB64 } from '../../utils/base64';
 
 export const findById = (
   context: AuthContext,
@@ -61,7 +62,7 @@ export const findById = (
   );
 };
 
-export const findAll = async (
+export const findPublicDashboardPaginated = async (
   context: AuthContext,
   user: AuthUser,
   args: QueryPublicDashboardsArgs,
@@ -78,7 +79,7 @@ export const findAll = async (
     }
   );
 
-  const dashboardIds = dashboards.edges.map((n) => (n.node.id));
+  const dashboardIds = dashboards.map((n) => n.id);
   if (dashboardIds.length === 0) {
     return {
       edges: [],
@@ -93,7 +94,7 @@ export const findAll = async (
   }
 
   const filters = addFilter(args.filters ?? undefined, 'dashboard_id', dashboardIds);
-  return listEntitiesPaginated<BasicStoreEntityPublicDashboard>(
+  return pageEntitiesConnection<BasicStoreEntityPublicDashboard>(
     context,
     user,
     [ENTITY_TYPE_PUBLIC_DASHBOARD],
@@ -179,7 +180,7 @@ export const addPublicDashboard = async (
     throw FunctionalError(`Cannot publish this dashboard, uri key ${uriKey} already used.`);
   }
 
-  const parsedManifest = JSON.parse(fromBase64(dashboard.manifest) ?? '{}');
+  const parsedManifest = fromB64(dashboard.manifest ?? '{}');
   if (parsedManifest && isNotEmptyField(parsedManifest.widgets)) {
     Object.keys(parsedManifest.widgets).forEach((widgetId) => {
       parsedManifest.widgets[widgetId].dataSelection = parsedManifest
@@ -200,7 +201,7 @@ export const addPublicDashboard = async (
   }
 
   // Create public manifest
-  const publicManifest = toBase64(JSON.stringify(parsedManifest) ?? '{}');
+  const publicManifest = toB64(parsedManifest ?? '{}');
 
   // Create publicDashboard
   const publicDashboardToCreate = {
@@ -582,7 +583,7 @@ export const publicBookmarks = async (
 };
 
 // list & timeline
-export const publicStixCoreObjects = async (
+export const publicStixCoreObjectsPaginated = async (
   context: AuthContext,
   args: QueryPublicStixCoreObjectsArgs
 ) => {
@@ -606,7 +607,7 @@ export const publicStixCoreObjects = async (
   };
 
   // Use standard API
-  return stixCoreObjects(context, user, parameters);
+  return findStixCoreObjectPaginated(context, user, parameters);
 };
 
 export const publicStixRelationships = async (
@@ -632,6 +633,6 @@ export const publicStixRelationships = async (
   };
 
   // Use standard API
-  return (await stixRelationships(context, user, parameters) as unknown as StoreRelationConnection<BasicStoreRelation>);
+  return (await findStixRelationPaginated(context, user, parameters) as unknown as StoreRelationConnection<BasicStoreRelation>);
 };
 // endregion

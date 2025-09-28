@@ -1,3 +1,4 @@
+import type Express from 'express';
 import type { BasicStoreCommon, BasicStoreIdentifier, StoreMarkingDefinition } from './store';
 import type { Group } from './group';
 import type { ConfidenceLevel } from '../generated/graphql';
@@ -30,6 +31,7 @@ interface AuthUser extends BasicStoreIdentifier {
   name: string
   user_email: string
   account_lock_after_date: Date | undefined
+  user_service_account?: boolean
   origin: Partial<UserOrigin>
   roles: Array<UserRole>
   groups: Array<Group>
@@ -49,6 +51,7 @@ interface AuthUser extends BasicStoreIdentifier {
   draft_context?: string | undefined
   otp_activated?: boolean;
   otp_secret?: string;
+  creator_id?: string | string[];
 }
 
 interface AuthContext {
@@ -63,4 +66,5 @@ interface AuthContext {
   user_inside_platform_organization: boolean
   user_otp_validated?: boolean
   user_with_session?: boolean
+  req?: Express.Request
 }

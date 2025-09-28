@@ -14,9 +14,10 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 */
 
 import { v4 as uuidv4 } from 'uuid';
+import type { FileHandle } from 'fs/promises';
 import { BUS_TOPICS, logApp } from '../../config/conf';
 import { createEntity, deleteElementById, patchAttribute, stixLoadById, updateAttribute } from '../../database/middleware';
-import { type EntityOptions, internalFindByIds, listAllEntities, listEntitiesPaginated, storeLoadById } from '../../database/middleware-loader';
+import { type EntityOptions, internalFindByIds, pageEntitiesConnection, storeLoadById } from '../../database/middleware-loader';
 import { notify } from '../../database/redis';
 import type { DomainFindById } from '../../domain/domainTypes';
 import { ABSTRACT_INTERNAL_OBJECT } from '../../schema/general';
@@ -33,7 +34,7 @@ import {
 import type { BasicStoreEntityPlaybook, ComponentDefinition, LinkDefinition, NodeDefinition } from './playbook-types';
 import { ENTITY_TYPE_PLAYBOOK } from './playbook-types';
 import { PLAYBOOK_COMPONENTS, PLAYBOOK_INTERNAL_DATA_CRON, type SharingConfiguration, type StreamConfiguration } from './playbook-components';
-import { UnsupportedError } from '../../config/errors';
+import { FunctionalError, UnsupportedError } from '../../config/errors';
 import { type BasicStoreEntityOrganization, ENTITY_TYPE_IDENTITY_ORGANIZATION } from '../organization/organization-types';
 import { isStixMatchFilterGroup, validateFilterGroupForStixMatch } from '../../utils/filtering/filtering-stix/stix-filtering';
 import { registerConnectorQueues, unregisterConnector } from '../../database/rabbitmq';
@@ -41,20 +42,33 @@ import { getEntitiesListFromCache } from '../../database/cache';
 import { SYSTEM_USER } from '../../utils/access';
 import { findFiltersFromKey, checkAndConvertFilters } from '../../utils/filtering/filtering-utils';
 import { elFindByIds } from '../../database/engine';
+import { checkEnterpriseEdition, isEnterpriseEdition } from '../../enterprise-edition/ee';
+import pjson from '../../../package.json';
+import { extractContentFrom } from '../../utils/fileToContent';
+import { publishUserAction } from '../../listener/UserActionListener';
+import { isCompatibleVersionWithMinimal } from '../../utils/version';
+import { buildPagination } from '../../database/utils';
 
-export const findById: DomainFindById<BasicStoreEntityPlaybook> = (context: AuthContext, user: AuthUser, playbookId: string) => {
+const MINIMAL_COMPATIBLE_VERSION = '6.7.14';
+
+export const findById: DomainFindById<BasicStoreEntityPlaybook> = async (context: AuthContext, user: AuthUser, playbookId: string) => {
+  await checkEnterpriseEdition(context);
   return storeLoadById(context, user, playbookId, ENTITY_TYPE_PLAYBOOK);
 };
 
-export const findAll = (context: AuthContext, user: AuthUser, opts: EntityOptions<BasicStoreEntityPlaybook>) => {
-  return listEntitiesPaginated<BasicStoreEntityPlaybook>(context, user, [ENTITY_TYPE_PLAYBOOK], opts);
-};
-
-export const findAllPlaybooks = (context: AuthContext, user: AuthUser, opts: EntityOptions<BasicStoreEntityPlaybook>) => {
-  return listAllEntities<BasicStoreEntityPlaybook>(context, user, [ENTITY_TYPE_PLAYBOOK], opts);
+export const findPlaybookPaginated = async (context: AuthContext, user: AuthUser, opts: EntityOptions<BasicStoreEntityPlaybook>) => {
+  const isEE = await isEnterpriseEdition(context);
+  if (!isEE) {
+    return buildPagination(0, null, [], 0);
+  }
+  return pageEntitiesConnection<BasicStoreEntityPlaybook>(context, user, [ENTITY_TYPE_PLAYBOOK], opts);
 };
 
 export const findPlaybooksForEntity = async (context: AuthContext, user: AuthUser, id: string) => {
+  const isEE = await isEnterpriseEdition(context);
+  if (!isEE) {
+    return [];
+  }
   const stixEntity = await stixLoadById(context, user, id);
   const playbooks = await getEntitiesListFromCache<BasicStoreEntityPlaybook>(context, SYSTEM_USER, ENTITY_TYPE_PLAYBOOK);
   const filteredPlaybooks = [];
@@ -81,11 +95,13 @@ export const findPlaybooksForEntity = async (context: AuthContext, user: AuthUse
   return filteredPlaybooks;
 };
 
-export const availableComponents = () => {
+export const availableComponents = async (context: AuthContext) => {
+  await checkEnterpriseEdition(context);
   return Object.values(PLAYBOOK_COMPONENTS);
 };
 
 export const getPlaybookDefinition = async (context: AuthContext, playbook: BasicStoreEntityPlaybook) => {
+  await checkEnterpriseEdition(context);
   if (playbook.playbook_definition && playbook.playbook_definition.includes('PLAYBOOK_SHARING_COMPONENT')) {
     // parse playbook definition in case there is a sharing with organization component, in order to parse organizations to get their label
     const definition = JSON.parse(playbook.playbook_definition) as ComponentDefinition;
@@ -117,7 +133,12 @@ export const getPlaybookDefinition = async (context: AuthContext, playbook: Basi
   return playbook.playbook_definition;
 };
 
-const checkPlaybookFiltersAndBuildConfigWithCorrectFilters = async (context: AuthContext, user: AuthUser, input: PlaybookAddNodeInput, userId: string) => {
+const checkPlaybookFiltersAndBuildConfigWithCorrectFilters = async (
+  context: AuthContext,
+  user: AuthUser,
+  input: PlaybookAddNodeInput,
+  userId: string
+) => {
   if (!input.configuration) {
     return '{}';
   }
@@ -137,8 +158,8 @@ const checkPlaybookFiltersAndBuildConfigWithCorrectFilters = async (context: Aut
 };
 
 export const playbookAddNode = async (context: AuthContext, user: AuthUser, id: string, input: PlaybookAddNodeInput) => {
+  await checkEnterpriseEdition(context);
   const configuration = await checkPlaybookFiltersAndBuildConfigWithCorrectFilters(context, user, input, user.id);
-
   const playbook = await findById(context, user, id);
   const definition = JSON.parse(playbook.playbook_definition ?? '{}') as ComponentDefinition;
   const relatedComponent = PLAYBOOK_COMPONENTS[input.component_id];
@@ -196,6 +217,7 @@ const deleteLinksAndAllChildren = (definition: ComponentDefinition, links: LinkD
 };
 
 export const playbookUpdatePositions = async (context: AuthContext, user: AuthUser, id: string, positions: string) => {
+  await checkEnterpriseEdition(context);
   const playbook = await findById(context, user, id);
   const definition = JSON.parse(playbook.playbook_definition) as ComponentDefinition;
   const nodesPositions = JSON.parse(positions);
@@ -213,7 +235,14 @@ export const playbookUpdatePositions = async (context: AuthContext, user: AuthUs
   return patchAttribute(context, user, id, ENTITY_TYPE_PLAYBOOK, patch).then(() => id);
 };
 
-export const playbookReplaceNode = async (context: AuthContext, user: AuthUser, id: string, nodeId: string, input: PlaybookAddNodeInput) => {
+export const playbookReplaceNode = async (
+  context: AuthContext,
+  user: AuthUser,
+  id: string,
+  nodeId: string,
+  input: PlaybookAddNodeInput
+) => {
+  await checkEnterpriseEdition(context);
   const configuration = await checkPlaybookFiltersAndBuildConfigWithCorrectFilters(context, user, input, user.id);
 
   const playbook = await findById(context, user, id);
@@ -260,8 +289,16 @@ export const playbookReplaceNode = async (context: AuthContext, user: AuthUser, 
   return notify(BUS_TOPICS[ABSTRACT_INTERNAL_OBJECT].EDIT_TOPIC, updatedElem, user).then(() => nodeId);
 };
 
-// eslint-disable-next-line max-len
-export const playbookInsertNode = async (context: AuthContext, user: AuthUser, id: string, parentNodeId: string, parentPortId: string, childNodeId: string, input: PlaybookAddNodeInput) => {
+export const playbookInsertNode = async (
+  context: AuthContext,
+  user: AuthUser,
+  id: string,
+  parentNodeId: string,
+  parentPortId: string,
+  childNodeId: string,
+  input: PlaybookAddNodeInput
+) => {
+  await checkEnterpriseEdition(context);
   const playbook = await findById(context, user, id);
   const definition = JSON.parse(playbook.playbook_definition) as ComponentDefinition;
   const relatedComponent = PLAYBOOK_COMPONENTS[input.component_id];
@@ -340,6 +377,7 @@ export const playbookInsertNode = async (context: AuthContext, user: AuthUser, i
 };
 
 export const playbookDeleteNode = async (context: AuthContext, user: AuthUser, id: string, nodeId: string) => {
+  await checkEnterpriseEdition(context);
   const playbook = await findById(context, user, id);
   const definition = JSON.parse(playbook.playbook_definition) as ComponentDefinition;
   definition.nodes = definition.nodes.filter((n) => n.id !== nodeId);
@@ -356,6 +394,7 @@ export const playbookDeleteNode = async (context: AuthContext, user: AuthUser, i
 };
 
 export const playbookAddLink = async (context: AuthContext, user: AuthUser, id: string, input: PlaybookAddLinkInput) => {
+  await checkEnterpriseEdition(context);
   const playbook = await findById(context, user, id);
   const definition = JSON.parse(playbook.playbook_definition ?? '{}') as ComponentDefinition;
   // Check from consistency
@@ -395,6 +434,7 @@ export const playbookAddLink = async (context: AuthContext, user: AuthUser, id: 
 };
 
 export const playbookDeleteLink = async (context: AuthContext, user: AuthUser, id: string, linkId: string) => {
+  await checkEnterpriseEdition(context);
   const playbook = await findById(context, user, id);
   const definition = JSON.parse(playbook.playbook_definition) as ComponentDefinition;
   definition.links = definition.links.filter((n) => n.id !== linkId);
@@ -404,6 +444,7 @@ export const playbookDeleteLink = async (context: AuthContext, user: AuthUser, i
 };
 
 export const playbookAdd = async (context: AuthContext, user: AuthUser, input: PlaybookAddInput) => {
+  await checkEnterpriseEdition(context);
   const playbook_definition = JSON.stringify({ nodes: [], links: [] });
   const playbook = { ...input, playbook_definition, playbook_running: false };
   const created = await createEntity(context, user, playbook, ENTITY_TYPE_PLAYBOOK);
@@ -413,12 +454,94 @@ export const playbookAdd = async (context: AuthContext, user: AuthUser, input: P
 };
 
 export const playbookDelete = async (context: AuthContext, user: AuthUser, playbookId: string) => {
+  await checkEnterpriseEdition(context);
   const element = await deleteElementById(context, user, playbookId, ENTITY_TYPE_PLAYBOOK);
   await unregisterConnector(playbookId);
   return notify(BUS_TOPICS[ABSTRACT_INTERNAL_OBJECT].DELETE_TOPIC, element, user).then(() => playbookId);
 };
 
 export const playbookEdit = async (context: AuthContext, user: AuthUser, id: string, input: EditInput[]) => {
+  await checkEnterpriseEdition(context);
   const { element: updatedElem } = await updateAttribute(context, user, id, ENTITY_TYPE_PLAYBOOK, input);
   return notify(BUS_TOPICS[ABSTRACT_INTERNAL_OBJECT].EDIT_TOPIC, updatedElem, user);
+};
+
+export const playbookExport = async (playbook: BasicStoreEntityPlaybook) => {
+  const { name, description, playbook_mode, playbook_start, playbook_definition } = playbook;
+  return JSON.stringify({
+    openCTI_version: pjson.version,
+    type: 'playbook',
+    configuration: {
+      name,
+      description,
+      playbook_mode,
+      playbook_start,
+      playbook_definition,
+    }
+  });
+};
+
+export const playbookImport = async (context: AuthContext, user: AuthUser, file: Promise<FileHandle>) => {
+  const parsedData = await extractContentFrom(file);
+  // check platform version compatibility
+  if (!isCompatibleVersionWithMinimal(parsedData.openCTI_version, MINIMAL_COMPATIBLE_VERSION)) {
+    throw FunctionalError(
+      `Invalid version of the platform. Please upgrade your OpenCTI. Minimal version required: ${MINIMAL_COMPATIBLE_VERSION}`,
+      { reason: parsedData.openCTI_version },
+    );
+  }
+  if (parsedData.type !== 'playbook') {
+    throw FunctionalError('Invalid import type, must be playbook');
+  }
+  const config = parsedData.configuration;
+  const importData = {
+    name: config.name,
+    description: config.description,
+    playbook_start: config.playbook_start,
+    playbook_running: false,
+    playbook_mode: config.playbook_mode,
+    playbook_definition: config.playbook_definition,
+  };
+  const importPlaybook = await createEntity(context, user, importData, ENTITY_TYPE_PLAYBOOK);
+  const importPlaybookId = importPlaybook.id;
+  await publishUserAction({
+    user,
+    event_type: 'mutation',
+    event_scope: 'create',
+    event_access: 'extended',
+    message: `import ${importPlaybook.name} playbook`,
+    context_data: {
+      id: importPlaybookId,
+      entity_type: ENTITY_TYPE_PLAYBOOK,
+      input: importPlaybook,
+    },
+  });
+  return importPlaybookId;
+};
+
+export const playbookDuplicate = async (context: AuthContext, user: AuthUser, id: string) => {
+  const playbook = await findById(context, user, id);
+  const newPlaybook = {
+    name: `${playbook.name} - copy`,
+    description: playbook.description,
+    playbook_running: false,
+    playbook_start: playbook.playbook_start,
+    playbook_mode: playbook.playbook_mode,
+    playbook_definition: playbook.playbook_definition,
+  };
+  const importPlaybook = await createEntity(context, user, newPlaybook, ENTITY_TYPE_PLAYBOOK);
+  const importPlaybookId = importPlaybook.id;
+  await publishUserAction({
+    user,
+    event_type: 'mutation',
+    event_scope: 'create',
+    event_access: 'extended',
+    message: `duplicate ${importPlaybook.name} playbook`,
+    context_data: {
+      id: importPlaybookId,
+      entity_type: ENTITY_TYPE_PLAYBOOK,
+      input: importPlaybook,
+    },
+  });
+  return importPlaybookId;
 };

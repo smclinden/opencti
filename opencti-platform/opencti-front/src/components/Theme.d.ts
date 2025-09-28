@@ -11,6 +11,7 @@ declare module '@mui/material/IconButton' {
 declare module '@mui/material/Button' {
   interface ButtonPropsColorOverrides {
     ee: true
+    dangerZone: true
     pagination: true
   }
 }
@@ -67,6 +68,7 @@ interface ExtendedPaletteOptions extends PaletteOptions {
     secondary: string
     pagination: string
     lightBackground?: string
+    paper?: string
   }
   dangerZone: Partial<ExtendedColor>
   primary: Partial<ExtendedColor>

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import bodyParser from 'body-parser';
-import compression from 'compression';
+import compression, { filter as compressionFilter } from 'compression';
 import helmet from 'helmet';
 import nconf from 'nconf';
 import showdown from 'showdown';
@@ -13,7 +13,8 @@ import validator from 'validator';
 import archiverZipEncrypted from 'archiver-zip-encrypted';
 import rateLimit from 'express-rate-limit';
 import contentDisposition from 'content-disposition';
-import { basePath, booleanConf, DEV_MODE, ENABLED_UI, logApp, OPENCTI_SESSION } from '../config/conf';
+import { printSchema } from 'graphql/utilities';
+import { basePath, DEV_MODE, ENABLED_UI, logApp, OPENCTI_SESSION, PLATFORM_VERSION, AUTH_PAYLOAD_BODY_SIZE } from '../config/conf';
 import passport, { isStrategyActivated, STRATEGY_CERT } from '../config/providers';
 import { HEADERS_AUTHENTICATORS, loginFromProvider, sessionAuthenticateUser, userWithOrigin } from '../domain/user';
 import { downloadFile, getFileContent, isStorageAlive, loadFile } from '../database/file-storage';
@@ -30,15 +31,8 @@ import createSseMiddleware from '../graphql/sseMiddleware';
 import initTaxiiApi from './httpTaxii';
 import initHttpRollingFeeds from './httpRollingFeed';
 import { createAuthenticatedContext } from './httpAuthenticatedContext';
-
-const setCookieError = (res, message) => {
-  res.cookie('opencti_flash', message || 'Unknown error', {
-    maxAge: 10000,
-    httpOnly: false,
-    secure: booleanConf('app:https_cert:cookie_secure', false),
-    sameSite: 'strict',
-  });
-};
+import { setCookieError } from './httpUtils';
+import { getChatbotProxy } from './httpChatbotProxy';
 
 const extractRefererPathFromReq = (req) => {
   if (isNotEmptyField(req.headers.referer)) {
@@ -80,7 +74,7 @@ const publishFileRead = async (executeContext, auth, file) => {
   });
 };
 
-const createApp = async (app) => {
+const createApp = async (app, schema) => {
   const limiter = rateLimit({
     windowMs: nconf.get('app:rate_protection:time_window') * 1000, // seconds
     limit: nconf.get('app:rate_protection:max_requests'),
@@ -161,7 +155,9 @@ const createApp = async (app) => {
     }
   });
 
-  app.use(compression({}));
+  app.use(compression({
+    filter: (req, res) => res.getHeader('Content-Type') !== 'text/event-stream' && compressionFilter(req, res),
+  }));
 
   if (ENABLED_UI) {
     // -- Serv flags resources
@@ -185,6 +181,18 @@ const createApp = async (app) => {
 
   // -- Register the encryption module
   archiver.registerFormat('zip-encrypted', archiverZipEncrypted);
+
+  // -- API schema
+  app.get(`${basePath}/schema`, async (req, res) => {
+    const context = await createAuthenticatedContext(req, res, 'schema_get');
+    if (!context.user) {
+      res.sendStatus(403);
+      return;
+    }
+    res.set('Cache-Control', 'public, max-age=3600'); // 1 hour cache
+    res.set('Vary', 'X-OPENCTI-SCHEMA-VARY-CACHE'); // Way for client to invalidate cache
+    res.json({ version: PLATFORM_VERSION, schema: printSchema(schema) });
+  });
 
   // -- File download
   app.get(`${basePath}/storage/get/:file(*)`, async (req, res) => {
@@ -217,6 +225,39 @@ const createApp = async (app) => {
         return;
       }
       const { file } = req.params;
+      const data = await loadFile(context, context.user, file);
+      await publishFileRead(context, context.user, data);
+      res.set('Content-disposition', contentDisposition(data.name, { type: 'inline' }));
+      res.set({ 'Content-Security-Policy': 'sandbox' });
+      res.set('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+      res.set({ Pragma: 'no-cache' });
+      if (data.metaData.mimetype === 'text/html') {
+        res.set({ 'Content-type': 'text/html; charset=utf-8' });
+      } else {
+        res.set('Content-type', data.metaData.mimetype);
+      }
+      const stream = await downloadFile(file);
+      stream.pipe(res);
+    } catch (e) {
+      setCookieError(res, e.message);
+      logApp.error('Error getting storage view file', { cause: e });
+      res.status(503).send({ status: 'error', error: e.message });
+    }
+  });
+
+  // -- embedded loader
+  const uuidPattern = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
+  const embeddedFileGetPath = new RegExp(`${basePath}/(.*)/(${uuidPattern})/(.*)embedded/(.*)$`, 'i');
+  app.get(embeddedFileGetPath, async (req, res) => {
+    try {
+      const [_, id, __, filename] = Object.values(req.params);
+      const context = await createAuthenticatedContext(req, res, 'storage_view_embedded');
+      if (!context.user) {
+        res.sendStatus(403);
+        return;
+      }
+      const element = await internalLoadById(context, context.user, id);
+      const file = `embedded/${element.entity_type}/${id}/${filename}`;
       const data = await loadFile(context, context.user, file);
       await publishFileRead(context, context.user, data);
       res.set('Content-disposition', contentDisposition(data.name, { type: 'inline' }));
@@ -351,6 +392,7 @@ const createApp = async (app) => {
           const strategy = passport._strategy(provider);
           if (strategy) {
             if (strategy.logout_remote === true) {
+              logApp.debug('[LOGOUT] Looking for logout_remote parameters: ', strategy.logout_remote);
               if (strategy.logout) {
                 logApp.debug('[LOGOUT] requesting remote logout using authentication strategy parameters.');
                 req.user = user; // Needed for passport
@@ -414,7 +456,8 @@ const createApp = async (app) => {
   });
 
   // -- Passport callback
-  const urlencodedParser = bodyParser.urlencoded({ extended: true });
+  // -- Default limit is '100kb' based on https://expressjs.com/en/resources/middleware/body-parser.html
+  const urlencodedParser = AUTH_PAYLOAD_BODY_SIZE ? bodyParser.urlencoded({ extended: true, limit: AUTH_PAYLOAD_BODY_SIZE }) : bodyParser.urlencoded({ extended: true });
   app.all(`${basePath}/auth/:provider/callback`, urlencodedParser, async (req, res, next) => {
     const referer = req.body.RelayState ?? req.session.referer;
     const { provider } = req.params;
@@ -471,6 +514,9 @@ const createApp = async (app) => {
     }
   });
 
+  // -- Chatbot Proxy
+  app.post(`${basePath}/chatbot`, getChatbotProxy);
+
   // Other routes - Render index.html
   app.get('*', async (_, res) => {
     if (ENABLED_UI) {
@@ -509,7 +555,7 @@ const createApp = async (app) => {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err, req, res, next) => {
     logApp.error('Http call interceptor fail', { cause: err, referer: req.headers?.referer });
-    res.status(500).send({ status: 'error', error: err.stack });
+    res.status(500).send({ status: 'error', error: DEV_MODE ? err.stack : err.message });
   });
 
   return { sseMiddleware };

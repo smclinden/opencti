@@ -75,7 +75,12 @@ import {
   RELATION_SUBTECHNIQUE_OF,
   RELATION_TARGETS,
   RELATION_USES,
-  RELATION_VARIANT_OF
+  RELATION_VARIANT_OF,
+  RELATION_TECHNOLOGY,
+  RELATION_TECHNOLOGY_TO,
+  RELATION_TECHNOLOGY_FROM,
+  RELATION_DEMONSTRATES,
+  RELATION_AMPLIFIES,
 } from '../schema/stixCoreRelationship';
 import { isStixRefRelationship } from '../schema/stixRefRelationship';
 import { ABSTRACT_STIX_CYBER_OBSERVABLE, ENTITY_TYPE_THREAT_ACTOR } from '../schema/general';
@@ -266,6 +271,9 @@ export const stixCoreRelationshipsMapping: RelationshipMappings = {
   ],
   [`${ENTITY_TYPE_CHANNEL}_${ENTITY_TYPE_INTRUSION_SET}`]: [
     { name: RELATION_BELONGS_TO, type: REL_EXTENDED }
+  ],
+  [`${ENTITY_TYPE_CHANNEL}_${ENTITY_MEDIA_CONTENT}`]: [
+    { name: RELATION_AMPLIFIES, type: REL_NEW }
   ],
   // endregion
   // region COURSE_OF_ACTION
@@ -546,6 +554,9 @@ export const stixCoreRelationshipsMapping: RelationshipMappings = {
   [`${ENTITY_TYPE_INFRASTRUCTURE}_${ENTITY_SOFTWARE}`]: [
     { name: RELATION_CONSISTS_OF, type: REL_EXTENDED },
     { name: RELATION_HOSTS, type: REL_EXTENDED },
+    { name: RELATION_TECHNOLOGY, type: REL_EXTENDED },
+    { name: RELATION_TECHNOLOGY_TO, type: REL_EXTENDED },
+    { name: RELATION_TECHNOLOGY_FROM, type: REL_EXTENDED },
   ],
   [`${ENTITY_TYPE_INFRASTRUCTURE}_${ENTITY_TYPE_ATTACK_PATTERN}`]: [
     { name: RELATION_DETECTS, type: REL_NEW }
@@ -998,7 +1009,8 @@ export const stixCoreRelationshipsMapping: RelationshipMappings = {
     { name: RELATION_USES, type: REL_EXTENDED }
   ],
   [`${ENTITY_HOSTNAME}_${ENTITY_DOMAIN_NAME}`]: [
-    { name: RELATION_COMMUNICATES_WITH, type: REL_EXTENDED }
+    { name: RELATION_COMMUNICATES_WITH, type: REL_EXTENDED },
+    { name: RELATION_RESOLVES_TO, type: REL_EXTENDED },
   ],
   [`${ENTITY_HOSTNAME}_${ENTITY_IPV4_ADDR}`]: [
     { name: RELATION_COMMUNICATES_WITH, type: REL_EXTENDED },
@@ -1120,6 +1132,10 @@ export const stixCoreRelationshipsMapping: RelationshipMappings = {
     { name: RELATION_RESOLVES_TO, type: REL_BUILT_IN },
     { name: RELATION_DERIVED_FROM, type: REL_BUILT_IN }
   ],
+  [`${ENTITY_DOMAIN_NAME}_${ENTITY_HOSTNAME}`]: [
+    { name: RELATION_RESOLVES_TO, type: REL_BUILT_IN },
+    { name: RELATION_DERIVED_FROM, type: REL_BUILT_IN }
+  ],
   [`${ENTITY_DOMAIN_NAME}_${ENTITY_IPV4_ADDR}`]: [
     { name: RELATION_RESOLVES_TO, type: REL_BUILT_IN }
   ],
@@ -1158,7 +1174,8 @@ export const stixCoreRelationshipsMapping: RelationshipMappings = {
     { name: RELATION_COMMUNICATES_WITH, type: REL_EXTENDED }
   ],
   [`${ENTITY_HASHED_OBSERVABLE_STIX_FILE}_${ENTITY_TYPE_VULNERABILITY}`]: [
-    { name: RELATION_TARGETS, type: REL_EXTENDED }
+    { name: RELATION_TARGETS, type: REL_EXTENDED },
+    { name: RELATION_DEMONSTRATES, type: REL_EXTENDED }
   ],
   // endregion
   // region SOFTWARE
@@ -1179,8 +1196,11 @@ export const stixCoreRelationshipsMapping: RelationshipMappings = {
   [`${ENTITY_MEDIA_CONTENT}_${ENTITY_USER_ACCOUNT}`]: [
     { name: RELATION_AUTHORED_BY, type: REL_EXTENDED }
   ],
+  [`${ENTITY_MEDIA_CONTENT}_${ENTITY_TYPE_NARRATIVE}`]: [
+    { name: RELATION_USES, type: REL_EXTENDED }
+  ],
   [`${ENTITY_MEDIA_CONTENT}_${ENTITY_MEDIA_CONTENT}`]: [
-    { name: RELATION_DERIVED_FROM, type: REL_BUILT_IN }
+    { name: RELATION_DERIVED_FROM, type: REL_EXTENDED }
   ],
   // From USER_ACCOUNT
   [`${ENTITY_USER_ACCOUNT}_${ENTITY_MEDIA_CONTENT}`]: [

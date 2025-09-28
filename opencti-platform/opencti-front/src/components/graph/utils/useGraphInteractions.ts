@@ -79,8 +79,17 @@ const useGraphInteractions = () => {
   const zoomToFit = () => {
     const nbOfNodes = graphData?.nodes.length ?? 0;
     let padding = 50;
-    if (nbOfNodes === 1) padding = 300;
-    else if (nbOfNodes < 4) padding = 200;
+    if (nbOfNodes === 1) {
+      if (window.innerHeight < 600) {
+        padding = 50;
+      } else if (window.innerHeight < 900) {
+        padding = 150;
+      } else if (window.innerHeight < 1100) {
+        padding = 300;
+      } else {
+        padding = 400;
+      }
+    } else if (nbOfNodes < 4) padding = 200;
     else if (nbOfNodes < 8) padding = 100;
     // Different padding depending on the number of nodes in the graph.
     graphRef2D.current?.zoomToFit(400, padding);
@@ -396,10 +405,18 @@ const useGraphInteractions = () => {
     applyForces();
   };
 
+  const updateNode = (data: ObjectToParse) => {
+    const nodes = rawObjects.filter((o) => o.id !== data.id);
+    if (rawObjects.length === nodes.length) return;
+    const newNodes = [...nodes, data];
+    rebuildGraphData(newNodes);
+  };
+
   const addNode = (data: ObjectToParse) => {
-    if (!rawObjects.find((o) => o.id === data.id)) {
-      setRawObjects((old) => ([...old, data]));
+    if (rawObjects.find((o) => o.id === data.id)) {
+      return;
     }
+    setRawObjects((old) => ([...old, data]));
     const node = buildNode(data, rawPositions);
     setGraphData((oldData) => {
       const withoutExisting = (oldData?.nodes ?? []).filter((n) => n.id !== node.id);
@@ -518,6 +535,7 @@ const useGraphInteractions = () => {
     setLoadingCurrent,
     setZoom,
     setIsExpandOpen,
+    updateNode,
   };
 };
 

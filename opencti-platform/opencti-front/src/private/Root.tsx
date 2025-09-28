@@ -17,6 +17,9 @@ import generateAnalyticsConfig from './Analytics';
 import { RootMe_data$key } from './__generated__/RootMe_data.graphql';
 import { RootPrivateQuery } from './__generated__/RootPrivateQuery.graphql';
 import { RootSettings$data, RootSettings$key } from './__generated__/RootSettings.graphql';
+import 'filigran-chatbot/dist/web'; // allows to use <filigran-chatbot /> element
+import useNetworkCheck from '../utils/hooks/useCheckNetwork';
+import { useBaseHrefAbsolute } from '../utils/hooks/useDocumentModifier';
 
 const rootSettingsFragment = graphql`
   fragment RootSettings on Settings {
@@ -25,6 +28,7 @@ const rootSettingsFragment = graphql`
     platform_demo
     platform_banner_text
     request_access_enabled
+    platform_url
     platform_user_statuses {
       status
       message
@@ -48,6 +52,7 @@ const rootSettingsFragment = graphql`
     platform_openerm_url
     platform_openmtd_url
     platform_xtmhub_url
+    xtm_hub_registration_status
     platform_theme
     platform_whitemark
     platform_organization {
@@ -66,6 +71,8 @@ const rootSettingsFragment = graphql`
       running
       warning
     }
+    filigran_chatbot_ai_cgu_status
+    filigran_chatbot_ai_url
     platform_enterprise_edition {
       license_validated
       license_expired
@@ -88,6 +95,7 @@ const rootSettingsFragment = graphql`
     platform_ai_type
     platform_ai_has_token
     platform_trash_enabled
+    filigran_chatbot_ai_cgu_status
     platform_protected_sensitive_config {
       enabled
       markings {
@@ -124,7 +132,7 @@ const rootSettingsFragment = graphql`
       }
     }
     xtm_hub_token
-    xtm_hub_enrollment_status
+    xtm_hub_registration_status
   }
 `;
 
@@ -134,6 +142,7 @@ const meUserFragment = graphql`
     name
     entity_type
     lastname
+    api_token
     language
     theme
     user_email
@@ -347,6 +356,7 @@ const RootComponent: FunctionComponent<RootComponentProps> = ({ queryRef }) => {
     schemaRelationsTypesMapping,
     schemaRelationsRefTypesMapping,
     filterKeysSchema,
+    about,
   } = queryData;
   const settings = useFragment<RootSettings$key>(rootSettingsFragment, settingsFragment);
   const me = useFragment<RootMe_data$key>(meUserFragment, meFragment);
@@ -378,6 +388,8 @@ const RootComponent: FunctionComponent<RootComponentProps> = ({ queryRef }) => {
   const platformModuleHelpers = platformModuleHelper(settings);
   const platformAnalyticsConfiguration = generateAnalyticsConfig(settings);
 
+  const { isReachable } = useNetworkCheck(`${settings?.platform_xtmhub_url}/health`);
+  useBaseHrefAbsolute();
   return (
     <UserContext.Provider
       value={{
@@ -387,6 +399,8 @@ const RootComponent: FunctionComponent<RootComponentProps> = ({ queryRef }) => {
         entitySettings,
         platformModuleHelpers,
         schema,
+        isXTMHubAccessible: isReachable,
+        about,
       }}
     >
       <StyledEngineProvider injectFirst={true}>

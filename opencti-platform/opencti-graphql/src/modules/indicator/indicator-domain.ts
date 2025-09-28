@@ -1,7 +1,7 @@
 import * as R from 'ramda';
 import moment from 'moment/moment';
 import { createEntity, createRelation, distributionEntities, patchAttribute, storeLoadByIdWithRefs, timeSeriesEntities } from '../../database/middleware';
-import { type EntityOptions, listAllEntities, listEntitiesPaginated, listEntitiesThroughRelationsPaginated, storeLoadById } from '../../database/middleware-loader';
+import { type EntityOptions, fullEntitiesList, pageEntitiesConnection, pageRegardingEntitiesConnection, storeLoadById } from '../../database/middleware-loader';
 import { BUS_TOPICS, extendedErrors, logApp } from '../../config/conf';
 import { notify } from '../../database/redis';
 import { checkIndicatorSyntax } from '../../python/pythonBridge';
@@ -35,7 +35,7 @@ import {
   type QueryIndicatorsNumberArgs,
   type StixCyberObservable
 } from '../../generated/graphql';
-import type { BasicStoreCommon, NumberResult } from '../../types/store';
+import type { BasicStoreEntity, NumberResult } from '../../types/store';
 import {
   computeChartDecayAlgoSerie,
   type ComputeDecayChartInput,
@@ -65,8 +65,8 @@ export const findById = (context: AuthContext, user: AuthUser, indicatorId: stri
   return storeLoadById<BasicStoreEntityIndicator>(context, user, indicatorId, ENTITY_TYPE_INDICATOR);
 };
 
-export const findAll = (context: AuthContext, user: AuthUser, args: QueryIndicatorsArgs) => {
-  return listEntitiesPaginated<BasicStoreEntityIndicator>(context, user, [ENTITY_TYPE_INDICATOR], args);
+export const findIndicatorPaginated = (context: AuthContext, user: AuthUser, args: QueryIndicatorsArgs) => {
+  return pageEntitiesConnection<BasicStoreEntityIndicator>(context, user, [ENTITY_TYPE_INDICATOR], args);
 };
 
 /**
@@ -158,7 +158,7 @@ export const findIndicatorsForDecay = (context: AuthContext, user: AuthUser, max
     filters,
     maxSize,
   };
-  return listAllEntities<BasicStoreEntityIndicator>(context, user, [ENTITY_TYPE_INDICATOR], args);
+  return fullEntitiesList<BasicStoreEntityIndicator>(context, user, [ENTITY_TYPE_INDICATOR], args);
 };
 
 export const createObservablesFromIndicator = async (
@@ -344,6 +344,22 @@ export const addIndicator = async (context: AuthContext, user: AuthUser, indicat
   return notify(BUS_TOPICS[ABSTRACT_STIX_DOMAIN_OBJECT].ADDED_TOPIC, created, user);
 };
 
+export const MAX_DECAY_HISTORY_POINTS = 50;
+export const computeIndicatorDecayHistory = (currentHistory: DecayHistory[], newHistoryPoint: DecayHistory) => {
+  const newHistory = currentHistory;
+  newHistory.push(newHistoryPoint);
+  // If decay history length is too large, we need to trim it to keep it at a manageable size in ES
+  // we want to keep part of the start of the history, and part of the end of the history
+  if (newHistory.length > MAX_DECAY_HISTORY_POINTS) {
+    const startPointsToKeep = MAX_DECAY_HISTORY_POINTS / 2;
+    const endPointsToKeep = MAX_DECAY_HISTORY_POINTS - startPointsToKeep;
+    const startPoints = newHistory.slice(0, startPointsToKeep);
+    const endPoints = newHistory.slice(-endPointsToKeep);
+    return [...startPoints, ...endPoints];
+  }
+  return newHistory;
+};
+
 /**
  * Compute decay data when it's needed from indicator updates.
  * Return keys for 'decay_history', 'decay_next_reaction_date', 'valid_until'
@@ -357,11 +373,8 @@ export const restartDecayComputationOnEdit = (fromScore: number, indicatorBefore
   const updateDate = utcDate();
   inputToAdd.push({ key: 'decay_base_score', value: [fromScore] });
   inputToAdd.push({ key: 'decay_base_score_date', value: [updateDate.toISOString()] });
-  const decayHistory: DecayHistory[] = [...(indicatorBeforeUpdate.decay_history ?? [])];
-  decayHistory.push({
-    updated_at: nowDate,
-    score: fromScore,
-  });
+  const newDecayHistoryPoint = { updated_at: nowDate, score: fromScore };
+  const decayHistory = computeIndicatorDecayHistory([...(indicatorBeforeUpdate.decay_history ?? [])], newDecayHistoryPoint);
   inputToAdd.push({ key: 'decay_history', value: decayHistory });
   const nextScoreReactionDate = computeNextScoreReactionDate(fromScore, fromScore, indicatorDecayRule, updateDate);
   if (nextScoreReactionDate) {
@@ -450,11 +463,8 @@ export const indicatorEditField = async (context: AuthContext, user: AuthUser, i
         finalInput.push({ key: X_DETECTION, value: [false] });
         finalInput.push({ key: VALID_UNTIL, value: [nowDate.toISOString()] });
 
-        const decayHistory: DecayHistory[] = [...(indicatorBeforeUpdate.decay_history ?? [])];
-        decayHistory.push({
-          updated_at: nowDate,
-          score: revokeScore,
-        });
+        const newDecayHistoryPoint = { updated_at: nowDate, score: revokeScore };
+        const decayHistory = computeIndicatorDecayHistory([...(indicatorBeforeUpdate.decay_history ?? [])], newDecayHistoryPoint);
         finalInput.push({ key: 'decay_history', value: decayHistory });
       }
 
@@ -519,11 +529,8 @@ export const computeIndicatorDecayPatch = (indicator: BasicStoreEntityIndicator)
   }
   const newStableScore = model.decay_points.find((p) => (p || indicator.x_opencti_score) < indicator.x_opencti_score) || model.decay_revoke_score;
   if (newStableScore) {
-    const decayHistory: DecayHistory[] = [...(indicator.decay_history ?? [])];
-    decayHistory.push({
-      updated_at: new Date(),
-      score: newStableScore,
-    });
+    const newDecayHistoryPoint = { updated_at: new Date(), score: newStableScore };
+    const decayHistory = computeIndicatorDecayHistory([...(indicator.decay_history ?? [])], newDecayHistoryPoint);
     patch = {
       x_opencti_score: newStableScore,
       decay_history: decayHistory,
@@ -611,6 +618,6 @@ export const indicatorsDistributionByEntity = async (context: AuthContext, user:
 };
 // endregion
 
-export const observablesPaginated = async <T extends BasicStoreCommon>(context: AuthContext, user: AuthUser, indicatorId: string, args: EntityOptions<T>) => {
-  return listEntitiesThroughRelationsPaginated<T>(context, user, indicatorId, RELATION_BASED_ON, ABSTRACT_STIX_CYBER_OBSERVABLE, false, args);
+export const observablesPaginated = async <T extends BasicStoreEntity>(context: AuthContext, user: AuthUser, indicatorId: string, args: EntityOptions<T>) => {
+  return pageRegardingEntitiesConnection<T>(context, user, indicatorId, RELATION_BASED_ON, ABSTRACT_STIX_CYBER_OBSERVABLE, false, args);
 };

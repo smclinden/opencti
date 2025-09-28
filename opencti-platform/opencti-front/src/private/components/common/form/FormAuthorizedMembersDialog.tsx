@@ -16,10 +16,13 @@ import useAuth from '../../../../utils/hooks/useAuth';
 interface FormAuthorizedMembersDialogProps {
   id: string;
   mutation: GraphQLTaggedNode;
-  authorizedMembers?: AuthorizedMemberOption[];
+  authorizedMembers?: AuthorizedMemberOption[] | null;
   owner?: Creator;
   open?: boolean;
   handleClose?: () => void;
+  isCanUseEnable?: boolean;
+  canDeactivate: boolean;
+  customInfoMessage?: string;
 }
 
 const FormAuthorizedMembersDialog = ({
@@ -29,6 +32,9 @@ const FormAuthorizedMembersDialog = ({
   owner,
   open,
   handleClose,
+  isCanUseEnable,
+  canDeactivate,
+  customInfoMessage,
 }: FormAuthorizedMembersDialogProps) => {
   const draftContext = useDraftContext();
   const disabledInDraft = !!draftContext;
@@ -97,8 +103,10 @@ const FormAuthorizedMembersDialog = ({
         handleClose={handleClose || (() => setOpenDrawer(false))}
         onSubmit={onSubmit}
         owner={owner}
-        canDeactivate
+        canDeactivate={canDeactivate}
         showAllMembersLine={showAllMembersLine}
+        isCanUseEnable={isCanUseEnable}
+        customInfoMessage={customInfoMessage}
       />
     </>
   );

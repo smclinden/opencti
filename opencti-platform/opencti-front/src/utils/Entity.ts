@@ -10,6 +10,8 @@ export const resolveLink = (type = 'unknown'): string | null => {
       return '/dashboard/techniques/attack_patterns';
     case 'Campaign':
       return '/dashboard/threats/campaigns';
+    case 'Connectors':
+      return '/dashboard/data/ingestion/connectors';
     case 'FintelTemplate':
       return '/dashboard/settings/customization/entity_types';
     case 'FintelDesign':
@@ -139,6 +141,8 @@ export const resolveLink = (type = 'unknown'): string | null => {
       return '/dashboard/observations/observables';
     case 'Pir':
       return '/dashboard/pirs';
+    case 'EmailTemplate':
+      return '/dashboard/settings/accesses/email_templates';
     default:
       return null;
   }
@@ -149,17 +153,26 @@ export const computeLink = (node: {
   entity_type: string;
   relationship_type?: string;
   from?: { entity_type: string; id: string };
+  to?: { entity_type: string; id: string };
   type?: string;
-}): string => {
+}): string | undefined => {
   let redirectLink;
   if (node.relationship_type === 'stix-sighting-relationship' && node.from) {
     redirectLink = `${resolveLink(node.from.entity_type)}/${
       node.from.id
     }/knowledge/sightings/${node.id}`;
-  } else if (node.relationship_type && node.from) {
-    redirectLink = `${resolveLink(node.from.entity_type)}/${
-      node.from.id
-    }/knowledge/relations/${node.id}`;
+  } else if (node.relationship_type) {
+    if (node.from) { // 'from' not restricted
+      redirectLink = `${resolveLink(node.from.entity_type)}/${
+        node.from.id
+      }/knowledge/relations/${node.id}`;
+    } else if (node.to) { // if 'from' is restricted, redirect to the knowledge relationship tab of 'to'
+      redirectLink = `${resolveLink(node.to.entity_type)}/${
+        node.to.id
+      }/knowledge/relations/${node.id}`;
+    } else {
+      redirectLink = undefined; // no redirection if from and to are restricted
+    }
   } else if (node.entity_type === 'Workspace') {
     redirectLink = `${resolveLink(node.type)}/${node.id}`;
   } else {

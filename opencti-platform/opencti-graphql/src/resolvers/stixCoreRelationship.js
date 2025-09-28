@@ -1,7 +1,7 @@
 import { BUS_TOPICS } from '../config/conf';
 import {
   addStixCoreRelationship,
-  findAll,
+  findStixCoreRelationshipsPaginated,
   findById,
   stixCoreRelationshipAddRelation,
   stixCoreRelationshipAddRelations,
@@ -37,11 +37,12 @@ import {
 import { numberOfContainersForObject } from '../domain/container';
 import { paginatedForPathWithEnrichment } from '../modules/internal/document/document-domain';
 import { loadThroughDenormalized } from './stix';
+import { filterMembersWithUsersOrgs } from '../utils/access';
 
 const stixCoreRelationshipResolvers = {
   Query: {
     stixCoreRelationship: (_, { id }, context) => findById(context, context.user, id),
-    stixCoreRelationships: (_, args, context) => findAll(context, context.user, args),
+    stixCoreRelationships: (_, args, context) => findStixCoreRelationshipsPaginated(context, context.user, args),
     stixCoreRelationshipsTimeSeries: (_, args, context) => timeSeriesRelations(context, context.user, args),
     stixCoreRelationshipsMultiTimeSeries: (_, args, context) => stixCoreRelationshipsMultiTimeSeries(context, context.user, args),
     stixCoreRelationshipsDistribution: (_, args, context) => stixCoreRelationshipsDistribution(context, context.user, args),
@@ -70,7 +71,13 @@ const stixCoreRelationshipResolvers = {
     objectOrganization: (rel, _, context) => loadThroughDenormalized(context, context.user, rel, INPUT_GRANTED_REFS, { sortBy: 'name' }),
     objectLabel: (rel, _, context) => loadThroughDenormalized(context, context.user, rel, INPUT_LABELS, { sortBy: 'value' }),
     killChainPhases: (rel, _, context) => loadThroughDenormalized(context, context.user, rel, INPUT_KILLCHAIN, { sortBy: 'phase_name' }),
-    creators: (rel, _, context) => context.batch.creatorsBatchLoader.load(rel.creator_id),
+    creators: async (rel, _, context) => {
+      const creators = await context.batch.creatorsBatchLoader.load(rel.creator_id);
+      if (!creators) {
+        return [];
+      }
+      return filterMembersWithUsersOrgs(context, context.user, creators);
+    },
     objectMarking: (rel, _, context) => context.batch.markingsBatchLoader.load(rel),
     // endregion
     // region inner listing - cant be batch loaded

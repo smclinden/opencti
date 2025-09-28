@@ -18,6 +18,7 @@ import Tooltip from '@mui/material/Tooltip';
 import Box from '@mui/material/Box';
 import Alert from '@mui/material/Alert';
 import { ListItemButton } from '@mui/material';
+import AuthorizedMembersField from '../../common/form/AuthorizedMembersField';
 import CaseTemplateField from '../../common/form/CaseTemplateField';
 import KillChainPhasesField from '../../common/form/KillChainPhasesField';
 import OpenVocabField from '../../common/form/OpenVocabField';
@@ -168,6 +169,9 @@ const PlaybookAddComponentsContent = ({
   };
   const areStepsValid = () => {
     for (const n of actionsInputs) {
+      if (n && n.attribute === 'x_opencti_detection') {
+        return true;
+      }
       if (!n || !n.op || !n.attribute || !n.value || n.value.length === 0) {
         return false;
       }
@@ -370,7 +374,6 @@ const PlaybookAddComponentsContent = ({
             onChange={(_, value) => handleChangeActionInput(i, 'value', [
               { label: value, value, patch_value: value },
             ])}
-            initialValue={false} // to force onChange call on mount, as the switch starts with a correct value "false"
           />
         );
       case 'severity':
@@ -593,6 +596,21 @@ const PlaybookAddComponentsContent = ({
               />
               {Object.entries(configurationSchema?.properties ?? {}).map(
                 ([k, v]) => {
+                  if (k === 'access_restrictions') {
+                    return (
+                      <Field
+                        key={k}
+                        name="access_restrictions"
+                        label={t_i18n('Access restrictions')}
+                        component={AuthorizedMembersField}
+                        showAllMembersLine={true}
+                        enableAccesses={true}
+                        hideInfo={true}
+                        adminDefault={true}
+                        dynamicKeysForPlaybooks={true}
+                      />
+                    );
+                  }
                   if (k === 'authorized_members') {
                     return (
                       <ObjectMembersField
@@ -741,6 +759,11 @@ const PlaybookAddComponentsContent = ({
                               {(actionsInputs[i]?.op === 'replace' && ['objectMarking', 'objectLabel', 'objectAssignee', 'objectParticipant'].includes(actionsInputs[i]?.attribute)) && (
                                 <Alert severity="warning" style={{ marginBottom: 20 }}>
                                   {t_i18n('Replace operation will effectively replace this field values added in the context of this playbook such as enrichment or other knowledge manipulations but it will only append them if values are already written in the platform.')}
+                                </Alert>
+                              )}
+                              {(actionsInputs[i]?.op === 'replace' && actionsInputs[i]?.attribute === 'createdBy') && (
+                                <Alert severity="warning" style={{ marginBottom: 20 }}>
+                                  {t_i18n('Replace operation will effectively replace the author if the confidence level of the entity with the new author is superior to the one of the entity with the old author.')}
                                 </Alert>
                               )}
                               {(actionsInputs[i]?.op === 'remove') && (

@@ -1,22 +1,9 @@
 import Chip from '@mui/material/Chip';
 import React, { FunctionComponent } from 'react';
-import makeStyles from '@mui/styles/makeStyles';
 import { useTheme } from '@mui/styles';
 import type { Theme } from './Theme';
 import { useFormatter } from './i18n';
-
-const useStyles = makeStyles(() => ({
-  chipInList: {
-    fontSize: 12,
-    lineHeight: '12px',
-    height: 20,
-    float: 'left',
-    marginRight: 7,
-    borderRadius: 4,
-    width: 90,
-    textTransform: 'uppercase',
-  },
-}));
+import { chipInListBasicStyle } from '../utils/chipStyle';
 
 interface ItemOperationsProps {
   draftOperation?: string
@@ -57,7 +44,6 @@ const operationStylesDark = {
 };
 
 const ItemOperations: FunctionComponent<ItemOperationsProps> = ({ draftOperation }) => {
-  const classes = useStyles();
   const theme = useTheme<Theme>();
   const { t_i18n } = useFormatter();
 
@@ -106,9 +92,17 @@ const ItemOperations: FunctionComponent<ItemOperationsProps> = ({ draftOperation
     <Chip
       title={getChipTitle()}
       label={draftOperation}
-      classes={{ root: classes.chipInList }}
       variant="outlined"
-      style={getChipStyle()}
+      style={{
+        ...getChipStyle(),
+        ...{
+          ...chipInListBasicStyle,
+          lineHeight: '12px',
+          marginRight: 7,
+          width: 120,
+          textTransform: 'uppercase',
+        },
+      }}
     />
   );
 };

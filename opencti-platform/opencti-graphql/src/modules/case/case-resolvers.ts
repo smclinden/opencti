@@ -1,16 +1,17 @@
 import { Promise as BluePromise } from 'bluebird';
 import { stixDomainObjectDelete } from '../../domain/stixDomainObject';
 import type { Resolvers } from '../../generated/graphql';
-import { findAll, findById, upsertTemplateForCase } from './case-domain';
+import { findCasesPaginated, findById, upsertTemplateForCase } from './case-domain';
 import { caseTasksPaginated } from '../task/task-domain';
 import type { BasicStoreEntityTask } from '../task/task-types';
 import { loadThroughDenormalized } from '../../resolvers/stix';
 import { INPUT_PARTICIPANT } from '../../schema/general';
+import { filterMembersWithUsersOrgs } from '../../utils/access';
 
 const caseResolvers: Resolvers = {
   Query: {
     case: (_, { id }, context) => findById(context, context.user, id),
-    cases: (_, args, context) => findAll(context, context.user, args),
+    cases: (_, args, context) => findCasesPaginated(context, context.user, args),
   },
   Case: {
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -22,7 +23,13 @@ const caseResolvers: Resolvers = {
       return 'Unknown';
     },
     tasks: (current, args, context) => caseTasksPaginated<BasicStoreEntityTask>(context, context.user, current.id, args),
-    objectParticipant: (container, _, context) => loadThroughDenormalized(context, context.user, container, INPUT_PARTICIPANT, { sortBy: 'user_email' }),
+    objectParticipant: async (container, _, context) => {
+      const participants = await loadThroughDenormalized(context, context.user, container, INPUT_PARTICIPANT, { sortBy: 'user_email' });
+      if (!participants) {
+        return [];
+      }
+      return filterMembersWithUsersOrgs(context, context.user, participants);
+    }
   },
   CasesOrdering: {
     creator: 'creator_id',

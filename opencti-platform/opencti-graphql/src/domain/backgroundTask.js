@@ -6,7 +6,7 @@ import { ENTITY_TYPE_BACKGROUND_TASK, ENTITY_TYPE_INTERNAL_FILE, ENTITY_TYPE_USE
 import { deleteElementById, patchAttribute } from '../database/middleware';
 import { getUserAccessRight, MEMBER_ACCESS_RIGHT_ADMIN, SYSTEM_USER } from '../utils/access';
 import { ABSTRACT_STIX_CORE_OBJECT, ABSTRACT_STIX_CORE_RELATIONSHIP, RULE_PREFIX } from '../schema/general';
-import { buildEntityFilters, countAllThings, listEntities, storeLoadById } from '../database/middleware-loader';
+import { buildEntityFilters, countAllThings, topEntitiesList, pageEntitiesConnection, storeLoadById } from '../database/middleware-loader';
 import { checkActionValidity, createDefaultTask, TASK_TYPE_QUERY, TASK_TYPE_RULE } from './backgroundTask-common';
 import { publishUserAction } from '../listener/UserActionListener';
 import { ForbiddenAccess } from '../config/errors';
@@ -17,7 +17,7 @@ import { ENTITY_TYPE_CASE_TEMPLATE } from '../modules/case/case-template/case-te
 import { ENTITY_TYPE_EXTERNAL_REFERENCE, ENTITY_TYPE_LABEL } from '../schema/stixMetaObject';
 import { ENTITY_TYPE_DELETE_OPERATION } from '../modules/deleteOperation/deleteOperation-types';
 import { BackgroundTaskScope, FilterMode } from '../generated/graphql';
-import { findAll as findAllWorkspaces } from '../modules/workspace/workspace-domain';
+import { findAllWorkspaces } from '../modules/workspace/workspace-domain';
 import { addFilter } from '../utils/filtering/filtering-utils';
 import { getDraftContext } from '../utils/draftContext';
 import { ENTITY_TYPE_DRAFT_WORKSPACE } from '../modules/draftWorkspace/draftWorkspace-types';
@@ -40,22 +40,16 @@ export const DEFAULT_ALLOWED_TASK_ENTITY_TYPES = [
 
 export const MAX_TASK_ELEMENTS = 500;
 
-export const ACTION_TYPE_ADD = 'ADD';
-export const ACTION_TYPE_REMOVE = 'REMOVE';
-export const ACTION_TYPE_REPLACE = 'REPLACE';
-export const ACTION_TYPE_MERGE = 'MERGE';
-export const ACTION_TYPE_PROMOTE = 'PROMOTE';
-export const ACTION_TYPE_ENRICHMENT = 'ENRICHMENT';
-export const ACTION_TYPE_RULE_APPLY = 'RULE_APPLY';
-export const ACTION_TYPE_RULE_CLEAR = 'RULE_CLEAR';
-export const ACTION_TYPE_RULE_ELEMENT_RESCAN = 'RULE_ELEMENT_RESCAN';
-
 export const findById = async (context, user, taskId) => {
   return storeLoadById(context, user, taskId, ENTITY_TYPE_BACKGROUND_TASK);
 };
 
-export const findAll = (context, user, args) => {
-  return listEntities(context, user, [ENTITY_TYPE_BACKGROUND_TASK], args);
+export const findBackgroundTaskPaginated = (context, user, args) => {
+  return pageEntitiesConnection(context, user, [ENTITY_TYPE_BACKGROUND_TASK], args);
+};
+
+export const findBackgroundTask = (context, user, args) => {
+  return topEntitiesList(context, user, [ENTITY_TYPE_BACKGROUND_TASK], args);
 };
 
 export const buildQueryFilters = async (context, user, filters, search, taskPosition, scope, orderMode, excludedIds) => {
@@ -89,7 +83,7 @@ export const buildQueryFilters = async (context, user, filters, search, taskPosi
         }
       }
     );
-    const dashboardIds = dashboards.edges.map((n) => (n.node.id));
+    const dashboardIds = dashboards.map((n) => n.id);
     inputFilters = addFilter(inputFilters, 'dashboard_id', dashboardIds);
     types = [ENTITY_TYPE_PUBLIC_DASHBOARD];
   } else if (scope === BackgroundTaskScope.Dashboard || scope === BackgroundTaskScope.Investigation) {
@@ -166,8 +160,8 @@ export const deleteRuleTasks = async (context, user, ruleId) => {
     filters: [{ key: 'type', values: ['RULE'] }, { key: 'rule', values: [ruleId] }],
     filterGroups: [],
   };
-  const args = { filters: tasksFilters, connectionFormat: false };
-  const tasks = await listEntities(context, user, [ENTITY_TYPE_BACKGROUND_TASK], args);
+  const args = { filters: tasksFilters };
+  const tasks = await topEntitiesList(context, user, [ENTITY_TYPE_BACKGROUND_TASK], args);
   await Promise.all(tasks.map((t) => deleteElementById(context, user, t.internal_id, ENTITY_TYPE_BACKGROUND_TASK)));
 };
 

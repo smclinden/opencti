@@ -1,16 +1,16 @@
 import { useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { isNotEmptyField } from '../utils';
 
-export const useDocumentTitleModifier = (title: string) => {
+export const useBaseHrefAbsolute = () => {
+  const { origin } = window.location;
+  const { pathname } = useLocation();
+
   useEffect(() => {
-    const prevTitle = document.title;
-    if (prevTitle !== title) {
-      document.title = title;
-    }
-    return () => {
-      document.title = prevTitle;
-    };
-  });
+    const fullUrl = `${origin}${pathname}`;
+    const baseUrl = fullUrl.endsWith('/') ? fullUrl : `${fullUrl}/`;
+    document.querySelector('base')?.setAttribute('href', baseUrl);
+  }, [pathname]);
 };
 
 export const useDocumentLangModifier = (lang: string) => {

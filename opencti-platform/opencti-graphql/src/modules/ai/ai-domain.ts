@@ -15,6 +15,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
 import { callWithTimeout } from '@opentelemetry/sdk-metrics/build/esnext/utils';
 import { TimeoutError } from '@opentelemetry/sdk-metrics';
+import nconf from 'nconf';
 import { logApp } from '../../config/conf';
 import { FunctionalError, UnknownError } from '../../config/errors';
 import { queryAi, queryNLQAi } from '../../database/ai-llm';
@@ -22,9 +23,9 @@ import { elSearchFiles } from '../../database/file-search';
 import { storeLoadById } from '../../database/middleware-loader';
 import { isEmptyField } from '../../database/utils';
 import { generateFilterKeysSchema } from '../../domain/filterKeysSchema';
-import { findAll as findAllScos } from '../../domain/stixCoreObject';
-import { findAll as findAllSmos } from '../../domain/stixMetaObject';
-import { findAll as findAllUsers } from '../../domain/user';
+import { findStixCoreObjectPaginated } from '../../domain/stixCoreObject';
+import { findStixMetaObjectPaginated } from '../../domain/stixMetaObject';
+import { findUserPaginated } from '../../domain/user';
 import { checkEnterpriseEdition } from '../../enterprise-edition/ee';
 import type {
   FilterGroup,
@@ -33,7 +34,6 @@ import type {
   MutationAiNlqArgs,
   MutationAiSummarizeFilesArgs,
   StixMetaObjectConnection,
-  UserConnection
 } from '../../generated/graphql';
 import { Format, Tone } from '../../generated/graphql';
 import { ABSTRACT_STIX_CORE_OBJECT, ENTITY_TYPE_CONTAINER } from '../../schema/general';
@@ -324,7 +324,7 @@ const resolveValuesIdsMapForEntityTypes = async (context: AuthContext, user: Aut
     let resultIds: string[] = [];
     // case Stix-Core-Object
     if (entityTypes.every((type) => isStixCoreObject(type))) {
-      const result = await findAllScos(context, user, {
+      const result = await findStixCoreObjectPaginated(context, user, {
         filters: entityTypesFilter,
         search: value,
         orderBy: '_score',
@@ -332,15 +332,15 @@ const resolveValuesIdsMapForEntityTypes = async (context: AuthContext, user: Aut
       });
       resultIds = result.edges.map((n) => n.node.id);
     } else if (entityTypes.length === 1 && entityTypes.includes(ENTITY_TYPE_USER)) { // case User
-      const result = await findAllUsers(context, user, {
+      const result = await findUserPaginated(context, user, {
         filters: entityTypesFilter,
         search: value,
         orderBy: '_score',
         orderMode: 'desc',
       });
-      resultIds = (result as UserConnection).edges.map((n) => n.node.id);
+      resultIds = result.edges.map((n) => n.node.id);
     } else if (entityTypes.every((type) => isStixMetaObject(type))) { // case Stix-Meta-Object
-      const result = await findAllSmos(context, user, {
+      const result = await findStixMetaObjectPaginated(context, user, {
         filters: entityTypesFilter,
         search: value,
         orderBy: '_score',
@@ -417,7 +417,7 @@ export const generateNLQresponse = async (context: AuthContext, user: AuthUser, 
 
   // 01. query the model
   logApp.debug('[AI] Querying NLQ with prompt', { questionStart: search.substring(0, 100) });
-  const NLQ_TIMEOUT = 30 * 1000; // timeout: 30s
+  const NLQ_TIMEOUT = nconf.get('app:ai:timeout') || 60000;
   let rawResponse;
   try {
     rawResponse = await callWithTimeout(queryNLQAi(promptValue), NLQ_TIMEOUT);

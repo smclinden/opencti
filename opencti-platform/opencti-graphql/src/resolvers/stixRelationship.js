@@ -1,25 +1,27 @@
 import { includes } from 'ramda';
 import {
-  findAll,
+  findStixRelationPaginated,
   findById,
   getSpecVersionOrDefault,
   schemaRelationsTypesMapping,
   stixRelationshipDelete,
   stixRelationshipsDistribution,
   stixRelationshipsMultiTimeSeries,
-  stixRelationshipsNumber
+  stixRelationshipsNumber,
+  stixRelationshipsTimeSeries
 } from '../domain/stixRelationship';
 import { ABSTRACT_STIX_CORE_RELATIONSHIP, INPUT_CREATED_BY, } from '../schema/general';
 import { STIX_SIGHTING_RELATIONSHIP } from '../schema/stixSightingRelationship';
 import { STIX_REF_RELATIONSHIP_TYPES } from '../schema/stixRefRelationship';
-import { stixLoadByIdStringify, timeSeriesRelations } from '../database/middleware';
+import { stixLoadByIdStringify } from '../database/middleware';
 import { loadThroughDenormalized } from './stix';
+import { filterMembersWithUsersOrgs } from '../utils/access';
 
 const stixRelationshipResolvers = {
   Query: {
     stixRelationship: (_, { id }, context) => findById(context, context.user, id),
-    stixRelationships: (_, args, context) => findAll(context, context.user, args),
-    stixRelationshipsTimeSeries: (_, args, context) => timeSeriesRelations(context, context.user, args),
+    stixRelationships: (_, args, context) => findStixRelationPaginated(context, context.user, args),
+    stixRelationshipsTimeSeries: (_, args, context) => stixRelationshipsTimeSeries(context, context.user, args),
     stixRelationshipsMultiTimeSeries: (_, args, context) => stixRelationshipsMultiTimeSeries(context, context.user, args),
     stixRelationshipsDistribution: (_, args, context) => stixRelationshipsDistribution(context, context.user, args),
     stixRelationshipsNumber: (_, args, context) => stixRelationshipsNumber(context, context.user, args),
@@ -37,7 +39,13 @@ const stixRelationshipResolvers = {
       const idLoadArgs = { id: rel.toId, type: rel.toType };
       return (rel.to ? rel.to : context.batch.idsBatchLoader.load(idLoadArgs));
     },
-    creators: (rel, _, context) => context.batch.creatorsBatchLoader.load(rel.creator_id),
+    creators: async (rel, _, context) => {
+      const creators = await context.batch.creatorsBatchLoader.load(rel.creator_id);
+      if (!creators) {
+        return [];
+      }
+      return filterMembersWithUsersOrgs(context, context.user, creators);
+    },
     createdBy: (rel, _, context) => loadThroughDenormalized(context, context.user, rel, INPUT_CREATED_BY),
     toStix: (rel, _, context) => stixLoadByIdStringify(context, context.user, rel.id),
     objectMarking: (rel, _, context) => context.batch.markingsBatchLoader.load(rel, context, context.user),

@@ -154,7 +154,7 @@ const FintelDesigns = () => {
   };
 
   return (
-    <>
+    <div data-testid="fintel-designs-page">
       <CustomizationMenu />
       <PageContainer withGap withRightMenu >
         <Breadcrumbs
@@ -184,13 +184,13 @@ const FintelDesigns = () => {
               disableLineSelection
               preloadedPaginationProps={preloadedPaginationProps}
               createButton={<FintelDesignCreation paginationOptions={queryPaginationOptions} />}
-              icon={() => <ItemIcon type="fintel-design" />}
+              icon={() => <ItemIcon type="FintelDesign" />}
             />
             )}
           </>
         )}
       </PageContainer>
-    </>
+    </div>
   );
 };
 

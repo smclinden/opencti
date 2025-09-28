@@ -1,8 +1,9 @@
-import React, { ReactNode } from 'react';
+import React from 'react';
 import { graphql } from 'react-relay';
 import Tooltip from '@mui/material/Tooltip';
 import { MarkingDefinitionsLine_node$data } from '@components/settings/__generated__/MarkingDefinitionsLine_node.graphql';
 import DangerZoneChip from '@components/common/danger_zone/DangerZoneChip';
+import { useTheme } from '@mui/material/styles';
 import { MarkingDefinitionsLinesPaginationQuery } from './__generated__/MarkingDefinitionsLinesPaginationQuery.graphql';
 import MarkingDefinitionPopover from './marking_definitions/MarkingDefinitionPopover';
 import AccessesMenu from './AccessesMenu';
@@ -19,7 +20,9 @@ import { UsePreloadedPaginationFragment } from '../../../utils/hooks/usePreloade
 import useSensitiveModifications from '../../../utils/hooks/useSensitiveModifications';
 import { Truncate } from '../../../components/dataGrid/dataTableUtils';
 import type { DataTableColumn } from '../../../components/dataGrid/dataTableTypes';
-import ItemIcon from '../../../components/ItemIcon';
+import type { Theme } from '../../../components/Theme';
+import MarkingIcon from '../../../utils/MarkingIcon';
+import ItemCopy from '../../../components/ItemCopy';
 
 const LOCAL_STORAGE_KEY = 'MarkingDefinitions';
 
@@ -97,6 +100,7 @@ const markingDefinitionsLinesFragment = graphql`
 
 const MarkingDefinitions = () => {
   const { t_i18n } = useFormatter();
+  const theme = useTheme<Theme>();
   const { setTitle } = useConnectedDocumentModifier();
   setTitle(t_i18n('Marking Definitions | Security | Settings'));
 
@@ -131,27 +135,21 @@ const MarkingDefinitions = () => {
     );
   };
 
-  const iconRender = (
-    data: MarkingDefinitionsLine_node$data,
-  ) : ReactNode => {
-    const { x_opencti_color } = data;
-    return (
-      <ItemIcon
-        type="Marking-Definition"
-        color={x_opencti_color ?? undefined}
-      />
-    );
-  };
-
   const dataColumns = {
     definition_type: {
-      percentWidth: 25,
+      percentWidth: 15,
       render: definitionTypeRender,
     },
-    definition: { percentWidth: 25 },
+    definition: { percentWidth: 20 },
+    id: {
+      label: 'ID',
+      percentWidth: 25,
+      isSortable: true,
+      render: (node: { id: string; }) => <ItemCopy content={node.id} variant="inLine" />,
+    },
     x_opencti_color: { percentWidth: 15 },
-    x_opencti_order: { percentWidth: 15 },
-    created: { percentWidth: 20 },
+    x_opencti_order: { percentWidth: 10 },
+    created: { percentWidth: 15 },
   };
 
   const queryRef = useQueryLoading(
@@ -168,7 +166,7 @@ const MarkingDefinitions = () => {
   } as UsePreloadedPaginationFragment<MarkingDefinitionsLinesPaginationQuery>;
 
   return (
-    <div style={{ paddingRight: '200px' }}>
+    <div style={{ paddingRight: '200px' }} data-testid="marking-settings-page">
       <Breadcrumbs elements={[
         { label: t_i18n('Settings') },
         { label: t_i18n('Security') },
@@ -185,7 +183,12 @@ const MarkingDefinitions = () => {
           toolbarFilters={contextFilters}
           lineFragment={markingDefinitionLineFragment}
           preloadedPaginationProps={preloadedPaginationProps}
-          icon={iconRender}
+          icon={(data) => {
+            const { x_opencti_color } = data;
+            return (
+              <MarkingIcon theme={theme} color={x_opencti_color}/>
+            );
+          }}
           actions={(markingDefinition) => (
             <MarkingDefinitionPopover
               markingDefinition={markingDefinition}

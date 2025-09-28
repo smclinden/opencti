@@ -90,7 +90,6 @@ const REPORT_TYPE = 'Report';
 const ReportEditionOverviewComponent = (props) => {
   const { report, enableReferences, context, handleClose } = props;
   const { t_i18n } = useFormatter();
-
   const { mandatoryAttributes } = useIsMandatoryAttribute(REPORT_TYPE);
   const basicShape = yupShapeConditionalRequired({
     name: Yup.string().trim().min(2),
@@ -154,7 +153,6 @@ const ReportEditionOverviewComponent = (props) => {
       },
     });
   };
-
   const handleSubmitField = (name, value) => {
     if (!enableReferences) {
       let finalValue = value;
@@ -174,7 +172,6 @@ const ReportEditionOverviewComponent = (props) => {
         .catch(() => false);
     }
   };
-
   const initialValues = R.pipe(
     R.assoc('published', buildDate(report.published)),
     R.assoc('report_types', report.report_types ?? []),
@@ -199,7 +196,6 @@ const ReportEditionOverviewComponent = (props) => {
       'x_opencti_workflow_id',
     ]),
   )(report);
-
   return (
     <Formik
       enableReinitialize={true}
@@ -383,6 +379,18 @@ export default createFragmentContainer(ReportEditionOverviewComponent, {
           id
           name
           entity_type
+        }
+        ... on Organization {
+          currentUserAccessRight
+        }
+        ... on Individual {
+          organizations {
+            edges {
+              node {
+                currentUserAccessRight
+              }
+            }
+          }
         }
       }
       objectMarking {

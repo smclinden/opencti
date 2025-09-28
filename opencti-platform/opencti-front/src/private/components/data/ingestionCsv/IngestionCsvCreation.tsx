@@ -26,8 +26,8 @@ import IngestionSchedulingField from '@components/data/IngestionSchedulingField'
 import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
 import IngestionCsvInlineMapperForm from '@components/data/ingestionCsv/IngestionCsvInlineMapperForm';
-import IngestionCsvCreationUserHandling from '@components/data/ingestionCsv/IngestionCsvCreationUserHandling';
 import { IngestionCsvCreationUsersQuery$data } from '@components/data/ingestionCsv/__generated__/IngestionCsvCreationUsersQuery.graphql';
+import IngestionCreationUserHandling, { BasicUserHandlingValues } from '@components/data/IngestionCreationUserHandling';
 import Drawer, { DrawerControlledDialProps } from '../../common/drawer/Drawer';
 import { useFormatter } from '../../../../components/i18n';
 import TextField from '../../../../components/TextField';
@@ -118,7 +118,7 @@ interface IngestionCsvCreationContainerProps extends IngestionCsvCreationProps {
 
 }
 
-export interface IngestionCsvAddInput {
+export interface IngestionCsvAddInput extends BasicUserHandlingValues {
   name: string
   message?: string | null
   references?: ExternalReferencesValues
@@ -214,7 +214,7 @@ const IngestionCsvCreation: FunctionComponent<IngestionCsvCreationProps> = ({ pa
     ca: Yup.string().nullable(),
     user_id: Yup.object(),
     automatic_user: Yup.boolean(),
-    confidence_level: Yup.string().nullable(),
+    confidence_level: Yup.number().nullable(),
   });
 
   const [commit] = useApiMutation(ingestionCsvCreationMutation);
@@ -231,7 +231,7 @@ const IngestionCsvCreation: FunctionComponent<IngestionCsvCreationProps> = ({ pa
 
       if ((existingUsers as IngestionCsvCreationUsersQuery$data)?.userAlreadyExists) {
         setSubmitting(false);
-        setFieldError('user_id', t_i18n('This user already exists. Change the feed\'s name to change the automatically created user\'s name'));
+        setFieldError('user_id', t_i18n('This service account already exists. Change the feed\'s name to change the automatically created service account name'));
         return;
       }
     }
@@ -247,7 +247,6 @@ const IngestionCsvCreation: FunctionComponent<IngestionCsvCreationProps> = ({ pa
       authenticationValue = `${values.cert}:${values.key}:${values.ca}`;
     }
     const markings = values.markings?.map((option) => option.value);
-
     const input = {
       name: values.name,
       description: values.description,
@@ -260,7 +259,7 @@ const IngestionCsvCreation: FunctionComponent<IngestionCsvCreationProps> = ({ pa
       authentication_value: authenticationValue,
       user_id: typeof values.user_id === 'string' ? values.user_id : values.user_id?.value,
       automatic_user: values.automatic_user ?? true,
-      ...((values.automatic_user !== false) && { confidence_level: values.confidence_level }),
+      ...((values.automatic_user !== false) && { confidence_level: Number(values.confidence_level) }),
       markings: markings ?? [],
     };
     commit({
@@ -372,7 +371,10 @@ const IngestionCsvCreation: FunctionComponent<IngestionCsvCreationProps> = ({ pa
                 fullWidth={true}
                 style={fieldSpacingContainerStyle}
               />
-              <IngestionCsvCreationUserHandling/>
+              <IngestionCreationUserHandling
+                default_confidence_level={50}
+                labelTag="F"
+              />
               <Box sx={{
                 marginTop: 2,
               }}

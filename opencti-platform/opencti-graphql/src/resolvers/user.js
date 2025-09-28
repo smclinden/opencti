@@ -14,9 +14,8 @@ import {
   bookmarks,
   buildCompleteUser,
   deleteBookmark,
-  findAll,
-  findAllMembers,
-  findAllSystemMembers,
+  findMembersPaginated,
+  findAllSystemMemberPaginated,
   findAssignees,
   findById,
   findCapabilities,
@@ -51,14 +50,16 @@ import {
   userOrganizationsPaginatedWithoutInferences,
   userRenewToken,
   userWithOrigin,
-  userRoles
+  userRoles,
+  sendEmailToUser,
+  findUserPaginated
 } from '../domain/user';
 import { subscribeToInstanceEvents, subscribeToUserEvents } from '../graphql/subscriptionWrapper';
 import { publishUserAction } from '../listener/UserActionListener';
 import { findById as findDraftById } from '../modules/draftWorkspace/draftWorkspace-domain';
 import { findById as findWorskpaceById } from '../modules/workspace/workspace-domain';
 import { ENTITY_TYPE_USER } from '../schema/internalObject';
-import { executionContext, REDACTED_USER } from '../utils/access';
+import { executionContext, filterMembersWithUsersOrgs, REDACTED_USER } from '../utils/access';
 import { getNotifiers } from '../modules/notifier/notifier-domain';
 
 const userResolvers = {
@@ -66,14 +67,20 @@ const userResolvers = {
     me: (_, __, context) => context.user,
     user: (_, { id }, context) => findById(context, context.user, id),
     otpGeneration: (_, __, context) => otpUserGeneration(context.user),
-    users: (_, args, context) => findAll(context, context.user, args),
+    users: (_, args, context) => findUserPaginated(context, context.user, args),
     role: (_, { id }, context) => findRoleById(context, context.user, id),
     roles: (_, args, context) => findRoles(context, context.user, args),
-    creators: (_, args, context) => findCreators(context, context.user, args),
+    creators: async (_, args, context) => { // all
+      const creators = await findCreators(context, context.user, args);
+      if (!creators) {
+        return [];
+      }
+      return filterMembersWithUsersOrgs(context, context.user, creators);
+    },
     assignees: (_, args, context) => findAssignees(context, context.user, args),
     participants: (_, args, context) => findParticipants(context, context.user, args),
-    members: (_, args, context) => findAllMembers(context, context.user, args),
-    systemMembers: () => findAllSystemMembers(),
+    members: (_, args, context) => findMembersPaginated(context, context.user, args),
+    systemMembers: () => findAllSystemMemberPaginated(),
     sessions: () => findSessions(),
     capabilities: (_, args, context) => findCapabilities(context, context.user, args),
     bookmarks: (_, args, context) => bookmarks(context, context.user, args),
@@ -239,6 +246,9 @@ const userResolvers = {
     userAdd: (_, { input }, context) => addUser(context, context.user, input),
     bookmarkAdd: (_, { id, type }, context) => addBookmark(context, context.user, id, type),
     bookmarkDelete: (_, { id }, context) => deleteBookmark(context, context.user, id),
+    sendUserMail: (_, { input }, context) => {
+      return sendEmailToUser(context, context.user, input);
+    }
   },
   Subscription: {
     me: {

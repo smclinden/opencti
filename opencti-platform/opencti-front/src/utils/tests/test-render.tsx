@@ -55,6 +55,10 @@ export const createMockUserContext = (options?: CreateUserContextOptions): UserC
     entitySettings: (entitySettings ?? {}) as UserContextType['entitySettings'],
     platformModuleHelpers: (platformModuleHelpers ?? {}) as UserContextType['platformModuleHelpers'],
     schema: (schema ?? {}) as UserContextType['schema'],
+    isXTMHubAccessible: true,
+    about: {
+      version: '6.7.17',
+    },
   };
 };
 

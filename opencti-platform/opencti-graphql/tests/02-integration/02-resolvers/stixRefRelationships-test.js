@@ -1,5 +1,6 @@
 import { expect, it, describe } from 'vitest';
 import gql from 'graphql-tag';
+import { now } from 'moment';
 import { queryAsAdmin } from '../../utils/testQuery';
 import { ABSTRACT_STIX_CORE_OBJECT, ABSTRACT_STIX_CYBER_OBSERVABLE } from '../../../src/schema/general';
 import { ENTITY_TYPE_MALWARE_ANALYSIS } from '../../../src/modules/malwareAnalysis/malwareAnalysis-types';
@@ -7,12 +8,16 @@ import { ENTITY_HASHED_OBSERVABLE_ARTIFACT, ENTITY_HASHED_OBSERVABLE_STIX_FILE, 
 
 describe('StixRefRelationship', () => {
   let stixRefRelationshipInternalId;
+  let stixRefRelationshipCreatedAt;
   it('should StixRefRelationship created', async () => {
     const CREATE_QUERY = gql`
             mutation StixDomainRelationAdd($input: StixRefRelationshipAddInput!) {
                 stixRefRelationshipAdd(input: $input) {
                     id
                     spec_version
+                    created_at
+                    updated_at
+                    confidence
                     from {
                         ... on Malware {
                             id
@@ -28,6 +33,7 @@ describe('StixRefRelationship', () => {
         fromId: 'malware--c6006dd5-31ca-45c2-8ae0-4e428e712f88',
         toId: 'software--b0debdba-74e7-4463-ad2a-34334ee66d8d',
         relationship_type: 'operating-system',
+        confidence: 90,
       },
     };
     const stixRefRelationship = await queryAsAdmin({
@@ -36,9 +42,40 @@ describe('StixRefRelationship', () => {
     });
 
     expect(stixRefRelationship.data.stixRefRelationshipAdd).not.toBeNull();
+    expect(stixRefRelationship.data.stixRefRelationshipAdd.created_at).toEqual(stixRefRelationship.data.stixRefRelationshipAdd.updated_at);
     expect(stixRefRelationship.data.stixRefRelationshipAdd.spec_version).toEqual('2.1');
+    expect(stixRefRelationship.data.stixRefRelationshipAdd.confidence).toEqual(90);
     expect(stixRefRelationship.data.stixRefRelationshipAdd.from.x_opencti_stix_ids[0]).toEqual('malware--c6006dd5-31ca-45c2-8ae0-4e428e712f88');
     stixRefRelationshipInternalId = stixRefRelationship.data.stixRefRelationshipAdd.id;
+    stixRefRelationshipCreatedAt = stixRefRelationship.data.stixRefRelationshipAdd.created_at;
+  });
+  it('should StixRefRelationship updated', async () => {
+    const UPDATE_QUERY = gql`
+      mutation StixDomainRelationUpdate($id: ID!, $input: [EditInput!]!) {
+        stixRefRelationshipEdit(id: $id) {
+          fieldPatch(input: $input) {
+            id
+            created_at
+            updated_at
+            confidence
+          }
+        }
+      }
+    `;
+    // Update the stixRefRelationship
+    const editInput = [{ key: 'confidence', value: '50' }];
+    const editionStartDatetime = now();
+    const stixRefRelationship = await queryAsAdmin({
+      query: UPDATE_QUERY,
+      variables: { id: stixRefRelationshipInternalId, input: editInput },
+    });
+
+    expect(stixRefRelationship.data.stixRefRelationshipEdit.fieldPatch).not.toBeNull();
+    // should modify confidence
+    expect(stixRefRelationship.data.stixRefRelationshipEdit.fieldPatch.confidence).toEqual(50);
+    // should modify updated_at
+    expect(editionStartDatetime < stixRefRelationship.data.stixRefRelationshipEdit.fieldPatch.updated_at).toBeTruthy();
+    expect(stixRefRelationshipCreatedAt < stixRefRelationship.data.stixRefRelationshipEdit.fieldPatch.updated_at).toBeTruthy();
   });
   it('should stixRefRelationship deleted', async () => {
     const READ_QUERY = gql`

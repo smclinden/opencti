@@ -86,9 +86,7 @@ const GROUPING_TYPE = 'Grouping';
 const GroupingEditionOverviewComponent = (props) => {
   const { grouping, enableReferences, context, handleClose } = props;
   const { t_i18n } = useFormatter();
-
   const { mandatoryAttributes } = useIsMandatoryAttribute(GROUPING_TYPE);
-
   const basicShape = yupShapeConditionalRequired({
     name: Yup.string().trim().min(2),
     confidence: Yup.number().nullable(),
@@ -99,9 +97,7 @@ const GroupingEditionOverviewComponent = (props) => {
     createdBy: Yup.object().nullable(),
     objectMarking: Yup.array().nullable(),
   }, mandatoryAttributes);
-
   const groupingValidator = useDynamicSchemaEditionValidation(mandatoryAttributes, basicShape);
-
   const queries = {
     fieldPatch: groupingMutationFieldPatch,
     relationAdd: groupingMutationRelationAdd,
@@ -114,7 +110,6 @@ const GroupingEditionOverviewComponent = (props) => {
     queries,
     groupingValidator,
   );
-
   const onSubmit = (values, { setSubmitting }) => {
     const commitMessage = values.message;
     const references = R.pluck('value', values.references || []);
@@ -165,7 +160,6 @@ const GroupingEditionOverviewComponent = (props) => {
         .catch(() => false);
     }
   };
-
   const initialValues = R.pipe(
     R.assoc('createdBy', convertCreatedBy(grouping)),
     R.assoc('objectMarking', convertMarkings(grouping)),
@@ -182,7 +176,6 @@ const GroupingEditionOverviewComponent = (props) => {
       'x_opencti_workflow_id',
     ]),
   )(grouping);
-
   return (
     <Formik
       enableReinitialize={true}
@@ -322,6 +315,18 @@ export default createFragmentContainer(GroupingEditionOverviewComponent, {
           id
           name
           entity_type
+        }
+        ... on Organization {
+          currentUserAccessRight
+        }
+        ... on Individual {
+          organizations {
+            edges {
+              node {
+                currentUserAccessRight
+              }
+            }
+          }
         }
       }
       objectMarking {
